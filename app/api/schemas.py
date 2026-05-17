@@ -168,3 +168,23 @@ class DiscoveredUrlJobCreationResponse(BaseModel):
     created_count: int
     skipped_count: int
     job_ids: list[str] = Field(default_factory=list)
+
+
+class ProcessManyJobsRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1)
+    max_jobs: int = Field(default=10, ge=1, le=20)
+
+
+class ProcessedJobItemResponse(BaseModel):
+    job_id: str
+    status: str
+    job_type: JobType | None = None
+    result_product_id: str | None = None
+    error_message: str | None = None
+
+
+class ProcessManyJobsResponse(BaseModel):
+    requested_count: int
+    processed_count: int
+    skipped_count: int
+    results: list[ProcessedJobItemResponse] = Field(default_factory=list)
