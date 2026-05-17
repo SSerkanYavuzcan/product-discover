@@ -16,6 +16,7 @@ from app.api.schemas import (
     ProcessedJobItemResponse,
     ProcessManyJobsRequest,
     ProcessManyJobsResponse,
+    ProductListResponse,
     ProductReadResponse,
     SitemapDiscoveryRequest,
     SourceActiveStatusRequest,
@@ -29,7 +30,7 @@ from app.discovery import discover_urls_from_source_sitemap
 from app.ingestion.barcode import create_barcode_lookup_job
 from app.ingestion.url import create_url_extraction_job
 from app.jobs.models import DiscoveryJob
-from app.models.repository import get_product, get_product_by_barcode
+from app.models.repository import get_product, get_product_by_barcode, list_products
 from app.processing.discovered_url_jobs import create_url_extraction_jobs_from_discovered_urls
 from app.sources import (
     SourceRegistry,
@@ -330,6 +331,34 @@ def patch_source_active_status(
         )
 
     return SourceRegistryResponse.model_validate(source.model_dump())
+
+
+@router.get(
+    "/products",
+    response_model=ProductListResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_products(
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = 100,
+    offset: int = 0,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)] = None,
+) -> ProductListResponse:
+    normalized_limit = 100 if limit <= 0 else min(limit, 500)
+    normalized_offset = max(offset, 0)
+    products = list_products(
+        connection=connection,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    items = [ProductReadResponse.model_validate(product.model_dump()) for product in products]
+    return ProductListResponse(
+        items=items,
+        count=len(items),
+        limit=normalized_limit,
+        offset=normalized_offset,
+    )
 
 
 @router.get(

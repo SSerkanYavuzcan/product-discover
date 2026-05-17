@@ -90,6 +90,13 @@ class ProductReadResponse(BaseModel):
     updated_at: datetime
 
 
+class ProductListResponse(BaseModel):
+    items: list[ProductReadResponse] = Field(default_factory=list)
+    count: int
+    limit: int
+    offset: int
+
+
 class SourceRegistryCreateRequest(BaseModel):
     source_name: str
     source_type: str

@@ -169,6 +169,32 @@ def get_product_by_barcode(connection: sqlite3.Connection, barcode: str) -> Prod
     return _deserialize_product(row, evidence)
 
 
+def list_products(
+    connection: sqlite3.Connection,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[ProductProfile]:
+    normalized_limit = 100 if limit <= 0 else min(limit, 500)
+    normalized_offset = max(offset, 0)
+
+    query = "SELECT * FROM products"
+    params: list[object] = []
+    if status is not None:
+        query += " WHERE status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC, product_name ASC LIMIT ? OFFSET ?"
+    params.extend([normalized_limit, normalized_offset])
+
+    rows = connection.execute(query, tuple(params)).fetchall()
+    products: list[ProductProfile] = []
+    for row in rows:
+        product_id = row["product_id"]
+        evidence = list_product_evidence(connection, product_id)
+        products.append(_deserialize_product(row, evidence))
+    return products
+
+
 def update_product(
     connection: sqlite3.Connection,
     product: ProductProfile,
