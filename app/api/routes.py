@@ -5,8 +5,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies import get_barcode_job_processor, get_db_connection
-from app.api.schemas import JobProcessResponse
+from app.api.schemas import (
+    BarcodeIngestionRequest,
+    BarcodeIngestionResponse,
+    JobProcessResponse,
+)
 from app.config import get_settings
+from app.ingestion.barcode import create_barcode_lookup_job
+from app.jobs.models import DiscoveryJob
 
 router = APIRouter()
 
@@ -18,6 +24,28 @@ def health_check() -> dict[str, str]:
 
 
 @router.post(
+    "/ingest/barcode",
+    status_code=status.HTTP_201_CREATED,
+    response_model=BarcodeIngestionResponse,
+)
+def ingest_barcode(
+    payload: BarcodeIngestionRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> BarcodeIngestionResponse:
+    try:
+        job = create_barcode_lookup_job(
+            connection=connection,
+            barcode=payload.barcode,
+            priority=payload.priority,
+            batch_id=payload.batch_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return BarcodeIngestionResponse.model_validate(job.model_dump())
+
+
+@router.post(
     "/jobs/{job_id}/process",
     response_model=JobProcessResponse,
     status_code=status.HTTP_200_OK,
@@ -26,7 +54,7 @@ def process_job(
     job_id: str,
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
     processor: Annotated[
-        Callable[[sqlite3.Connection, str], object],
+        Callable[[sqlite3.Connection, str], DiscoveryJob | None],
         Depends(get_barcode_job_processor),
     ],
 ) -> JobProcessResponse:
