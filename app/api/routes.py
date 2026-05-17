@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies import get_barcode_job_processor, get_db_connection
+from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
@@ -55,7 +55,7 @@ def process_job(
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
     processor: Annotated[
         Callable[[sqlite3.Connection, str], DiscoveryJob | None],
-        Depends(get_barcode_job_processor),
+        Depends(get_discovery_job_processor),
     ],
 ) -> JobProcessResponse:
     try:
