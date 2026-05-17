@@ -1,0 +1,47 @@
+name: Deploy to Cloud Run
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-cloud-run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      IMAGE_URI: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}/product-discover-agent:${{ github.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Configure Docker authentication for Artifact Registry
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        run: docker build -t "$IMAGE_URI" .
+
+      - name: Push Docker image
+        run: docker push "$IMAGE_URI"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --image "$IMAGE_URI" \
+            --region "${{ vars.GCP_REGION }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "APP_NAME=product-discover-agent,ENVIRONMENT=production,LOG_LEVEL=INFO,DATABASE_BACKEND=sqlite,DATABASE_PATH=/tmp/product_discover_agent.db"
