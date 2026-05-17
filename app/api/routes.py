@@ -8,8 +8,10 @@ from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
+    ExtractionRunResponse,
     JobProcessResponse,
     ProductReadResponse,
+    SitemapDiscoveryRequest,
     SourceActiveStatusRequest,
     SourceRegistryCreateRequest,
     SourceRegistryResponse,
@@ -17,6 +19,7 @@ from app.api.schemas import (
     UrlIngestionResponse,
 )
 from app.config import get_settings
+from app.discovery import discover_urls_from_source_sitemap
 from app.ingestion.barcode import create_barcode_lookup_job
 from app.ingestion.url import create_url_extraction_job
 from app.jobs.models import DiscoveryJob
@@ -133,6 +136,31 @@ def read_active_sources(
 ) -> list[SourceRegistryResponse]:
     sources = list_active_sources(connection)
     return [SourceRegistryResponse.model_validate(source.model_dump()) for source in sources]
+
+
+@router.post(
+    "/sources/{source_id}/discover-sitemap",
+    response_model=ExtractionRunResponse,
+    status_code=status.HTTP_200_OK,
+)
+def discover_source_sitemap(
+    source_id: str,
+    payload: SitemapDiscoveryRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> ExtractionRunResponse:
+    run = discover_urls_from_source_sitemap(
+        connection=connection,
+        source_id=source_id,
+        max_child_sitemaps=payload.max_child_sitemaps,
+        product_only=payload.product_only,
+    )
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    return ExtractionRunResponse.model_validate(run.model_dump())
 
 
 @router.get(
