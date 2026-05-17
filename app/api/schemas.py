@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.jobs.models import JobPriority, JobStatus, JobType
 
@@ -19,6 +19,45 @@ class BarcodeIngestionResponse(BaseModel):
     input_type: str
     input_value: str
     batch_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class UrlIngestionRequest(BaseModel):
+    url: str
+    priority: JobPriority = JobPriority.normal
+    batch_id: str | None = None
+
+
+class UrlIngestionResponse(BaseModel):
+    job_id: str
+    job_type: JobType
+    status: JobStatus
+    priority: JobPriority
+    input_type: str
+    input_value: str
+    batch_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProductReadResponse(BaseModel):
+    product_id: str | None = None
+    barcode: str | None = None
+    gtin: str | None = None
+    product_name: str | None = None
+    brand: str | None = None
+    manufacturer: str | None = None
+    category: str | None = None
+    description: str | None = None
+    package: dict | None = None
+    images: list[dict] = Field(default_factory=list)
+    nutrition: dict | None = None
+    ingredients: list[str] = Field(default_factory=list)
+    allergens: list[str] = Field(default_factory=list)
+    evidence: list[dict] = Field(default_factory=list)
+    confidence: dict | None = None
+    status: str
     created_at: datetime
     updated_at: datetime
 
@@ -42,3 +81,36 @@ class JobProcessResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime
+
+
+class SourceRegistryCreateRequest(BaseModel):
+    source_name: str
+    source_type: str
+    base_url: str
+    country: str | None = None
+    language: str | None = None
+    is_active: bool = True
+    priority: int = 100
+    crawl_frequency_hours: int | None = None
+    robots_policy: str | None = None
+    notes: str | None = None
+
+
+class SourceRegistryResponse(BaseModel):
+    source_id: str
+    source_name: str
+    source_type: str
+    base_url: str
+    country: str | None = None
+    language: str | None = None
+    is_active: bool
+    priority: int
+    crawl_frequency_hours: int | None = None
+    robots_policy: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceActiveStatusRequest(BaseModel):
+    is_active: bool
