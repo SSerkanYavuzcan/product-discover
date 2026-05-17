@@ -10,9 +10,12 @@ from app.api.schemas import (
     BarcodeIngestionResponse,
     JobProcessResponse,
     ProductReadResponse,
+    UrlIngestionRequest,
+    UrlIngestionResponse,
 )
 from app.config import get_settings
 from app.ingestion.barcode import create_barcode_lookup_job
+from app.ingestion.url import create_url_extraction_job
 from app.jobs.models import DiscoveryJob
 from app.models.repository import get_product, get_product_by_barcode
 
@@ -45,6 +48,28 @@ def ingest_barcode(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return BarcodeIngestionResponse.model_validate(job.model_dump())
+
+
+@router.post(
+    "/ingest/url",
+    status_code=status.HTTP_201_CREATED,
+    response_model=UrlIngestionResponse,
+)
+def ingest_url(
+    payload: UrlIngestionRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> UrlIngestionResponse:
+    try:
+        job = create_url_extraction_job(
+            connection=connection,
+            url=payload.url,
+            priority=payload.priority,
+            batch_id=payload.batch_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return UrlIngestionResponse.model_validate(job.model_dump())
 
 
 @router.post(
