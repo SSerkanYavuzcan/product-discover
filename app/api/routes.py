@@ -8,6 +8,7 @@ from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
+    DashboardSummaryResponse,
     DiscoveredUrlJobCreationRequest,
     DiscoveredUrlJobCreationResponse,
     DiscoveredUrlResponse,
@@ -26,6 +27,7 @@ from app.api.schemas import (
     UrlIngestionResponse,
 )
 from app.config import get_settings
+from app.dashboard import get_dashboard_summary
 from app.discovery import discover_urls_from_source_sitemap
 from app.ingestion.barcode import create_barcode_lookup_job
 from app.ingestion.url import create_url_extraction_job
@@ -50,6 +52,18 @@ def health_check() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name}
 
 
+
+
+@router.get(
+    "/dashboard/summary",
+    response_model=DashboardSummaryResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_dashboard_summary(
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> DashboardSummaryResponse:
+    summary = get_dashboard_summary(connection)
+    return DashboardSummaryResponse.model_validate(summary)
 @router.post(
     "/ingest/barcode",
     status_code=status.HTTP_201_CREATED,

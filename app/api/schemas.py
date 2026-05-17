@@ -195,3 +195,52 @@ class ProcessManyJobsResponse(BaseModel):
     processed_count: int
     skipped_count: int
     results: list[ProcessedJobItemResponse] = Field(default_factory=list)
+
+
+class DashboardSourcesSummaryResponse(BaseModel):
+    total_sources: int
+    active_sources: int
+    inactive_sources: int
+
+
+class DashboardUrlsSummaryResponse(BaseModel):
+    total_discovered_urls: int
+    discovered_urls_today: int
+    queued_urls: int
+    processed_urls: int
+    failed_urls: int
+
+
+class DashboardProductsSummaryResponse(BaseModel):
+    total_products: int
+    products_today: int
+    discovered_products: int
+
+
+class DashboardJobsSummaryResponse(BaseModel):
+    total_jobs: int
+    pending_jobs: int
+    running_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    success_rate: float
+
+
+class DashboardLatestRunSummaryResponse(BaseModel):
+    run_id: str | None = None
+    source_id: str | None = None
+    status: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    pages_seen: int = 0
+    products_found: int = 0
+    error_message: str | None = None
+
+
+class DashboardSummaryResponse(BaseModel):
+    generated_at: str
+    sources: DashboardSourcesSummaryResponse
+    urls: DashboardUrlsSummaryResponse
+    products: DashboardProductsSummaryResponse
+    jobs: DashboardJobsSummaryResponse
+    latest_run: DashboardLatestRunSummaryResponse | None = None
