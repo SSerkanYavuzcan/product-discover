@@ -1,5 +1,6 @@
 import sqlite3
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -210,6 +211,7 @@ def test_list_discovered_urls_by_source_orders_and_filters(tmp_path) -> None:
             connection,
             SourceRegistry(source_name="Source", source_type="website", base_url="https://a.com"),
         )
+        seen_at = datetime(2026, 1, 1, tzinfo=UTC)
         create_discovered_url(
             connection,
             DiscoveredUrl(
@@ -217,6 +219,8 @@ def test_list_discovered_urls_by_source_orders_and_filters(tmp_path) -> None:
                 url="https://a.com/p/b",
                 discovery_type="sitemap",
                 status="discovered",
+                first_seen_at=seen_at,
+                last_seen_at=seen_at,
             ),
         )
         create_discovered_url(
@@ -226,6 +230,8 @@ def test_list_discovered_urls_by_source_orders_and_filters(tmp_path) -> None:
                 url="https://a.com/p/a",
                 discovery_type="sitemap",
                 status="discovered",
+                first_seen_at=seen_at,
+                last_seen_at=seen_at,
             ),
         )
         create_discovered_url(
