@@ -28,7 +28,21 @@ In this pattern, your frontend is hosted on Firebase Hosting, while API traffic 
 - **SQLite** is fine for local development and demos, but is not recommended for production persistence.
 - **Cloud SQL PostgreSQL** is the recommended future production database for durable, multi-instance relational storage.
 
-## 3) Environment variables
+## 3) Cloud Run container port
+
+Cloud Run injects a `PORT` environment variable into the container at runtime.
+Your container command should make Uvicorn listen on that port so Cloud Run can route traffic correctly.
+
+In this project, the Docker command uses:
+
+- `--host 0.0.0.0`
+- `--port ${PORT:-8000}`
+
+This keeps local container runs simple by defaulting to port `8000` when `PORT` is not set.
+
+After deployment, verify the service by calling the `/health` endpoint on the Cloud Run URL.
+
+## 4) Environment variables
 
 Use environment variables in Cloud Run for API runtime configuration:
 
@@ -43,7 +57,7 @@ DATABASE_PATH=data/product_discover_agent.db
 > **Important:** `DATABASE_PATH` is suitable only for local/demo SQLite usage.
 > A future production setup should use a PostgreSQL connection configuration.
 
-## 4) Example frontend request
+## 5) Example frontend request
 
 Your frontend can call the API through the Firebase rewrite path:
 
@@ -55,7 +69,7 @@ fetch("/api/ingest/barcode", {
 });
 ```
 
-## 5) Deployment sequence (checklist)
+## 6) Deployment sequence (checklist)
 
 1. Build and deploy the FastAPI container to Cloud Run.
 2. Configure Cloud Run environment variables.
@@ -65,7 +79,7 @@ fetch("/api/ingest/barcode", {
 6. Test the frontend calling `/api/health` or `/api/ingest/barcode`.
 7. Move from SQLite to Cloud SQL PostgreSQL before production data usage.
 
-## 6) Production notes (future improvements)
+## 7) Production notes (future improvements)
 
 For a production-grade platform, plan the following next steps:
 
