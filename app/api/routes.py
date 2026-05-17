@@ -1,5 +1,6 @@
 import sqlite3
 from collections.abc import Callable
+from dataclasses import asdict
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -63,7 +64,9 @@ def read_dashboard_summary(
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
 ) -> DashboardSummaryResponse:
     summary = get_dashboard_summary(connection)
-    return DashboardSummaryResponse.model_validate(summary)
+    return DashboardSummaryResponse.model_validate(asdict(summary))
+
+
 @router.post(
     "/ingest/barcode",
     status_code=status.HTTP_201_CREATED,
