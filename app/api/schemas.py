@@ -42,3 +42,36 @@ class JobProcessResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime
+
+
+class SourceRegistryCreateRequest(BaseModel):
+    source_name: str
+    source_type: str
+    base_url: str
+    country: str | None = None
+    language: str | None = None
+    is_active: bool = True
+    priority: int = 100
+    crawl_frequency_hours: int | None = None
+    robots_policy: str | None = None
+    notes: str | None = None
+
+
+class SourceRegistryResponse(BaseModel):
+    source_id: str
+    source_name: str
+    source_type: str
+    base_url: str
+    country: str | None = None
+    language: str | None = None
+    is_active: bool
+    priority: int
+    crawl_frequency_hours: int | None = None
+    robots_policy: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceActiveStatusRequest(BaseModel):
+    is_active: bool

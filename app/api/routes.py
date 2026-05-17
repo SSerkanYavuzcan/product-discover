@@ -9,10 +9,20 @@ from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
     JobProcessResponse,
+    SourceActiveStatusRequest,
+    SourceRegistryCreateRequest,
+    SourceRegistryResponse,
 )
 from app.config import get_settings
 from app.ingestion.barcode import create_barcode_lookup_job
 from app.jobs.models import DiscoveryJob
+from app.sources import (
+    SourceRegistry,
+    create_source,
+    get_source,
+    list_active_sources,
+    update_source_active_status,
+)
 
 router = APIRouter()
 
@@ -43,6 +53,56 @@ def ingest_barcode(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return BarcodeIngestionResponse.model_validate(job.model_dump())
+
+
+@router.post(
+    "/sources",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SourceRegistryResponse,
+)
+def create_source_registry(
+    payload: SourceRegistryCreateRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> SourceRegistryResponse:
+    source = create_source(connection, SourceRegistry.model_validate(payload.model_dump()))
+    return SourceRegistryResponse.model_validate(source.model_dump())
+
+
+@router.get("/sources", response_model=list[SourceRegistryResponse])
+def get_active_sources(
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> list[SourceRegistryResponse]:
+    sources = list_active_sources(connection)
+    return [SourceRegistryResponse.model_validate(source.model_dump()) for source in sources]
+
+
+@router.get("/sources/{source_id}", response_model=SourceRegistryResponse)
+def get_source_registry(
+    source_id: str,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> SourceRegistryResponse:
+    source = get_source(connection, source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+    return SourceRegistryResponse.model_validate(source.model_dump())
+
+
+@router.patch("/sources/{source_id}/active", response_model=SourceRegistryResponse)
+def patch_source_active_status(
+    source_id: str,
+    payload: SourceActiveStatusRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> SourceRegistryResponse:
+    source = update_source_active_status(connection, source_id, payload.is_active)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+    return SourceRegistryResponse.model_validate(source.model_dump())
 
 
 @router.post(

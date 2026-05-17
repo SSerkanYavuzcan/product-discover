@@ -1,9 +1,18 @@
 import json
 from datetime import UTC, datetime
-from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from app.models import ConfidenceScore, NutritionFacts, ProductImage, ProductProfile, SourceEvidence
+
+OPEN_FOOD_FACTS_USER_AGENT = (
+    "ProductDiscoverAgent/0.1 (https://github.com/SSerkanYavuzcan/product-discover)"
+)
+OPEN_FOOD_FACTS_ACCEPT_HEADER = "application/json"
+
+
+class OpenFoodFactsFetchError(RuntimeError):
+    pass
 
 
 def build_open_food_facts_url(barcode: str) -> str:
@@ -152,12 +161,27 @@ def fetch_open_food_facts_product(
     barcode: str, timeout_seconds: float = 10.0
 ) -> ProductProfile | None:
     url = build_open_food_facts_url(barcode)
+    request = Request(
+        url=url,
+        headers={
+            "User-Agent": OPEN_FOOD_FACTS_USER_AGENT,
+            "Accept": OPEN_FOOD_FACTS_ACCEPT_HEADER,
+        },
+    )
+
     try:
-        with urlopen(url, timeout=timeout_seconds) as response:  # noqa: S310
+        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
-    except (URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
-        return None
+    except HTTPError as exc:
+        raise OpenFoodFactsFetchError(f"Open Food Facts HTTP error: {exc.code}") from exc
+    except URLError as exc:
+        raise OpenFoodFactsFetchError(f"Open Food Facts network error: {exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise OpenFoodFactsFetchError("Open Food Facts returned invalid JSON") from exc
+    except OSError as exc:
+        raise OpenFoodFactsFetchError(f"Open Food Facts fetch failed: {exc}") from exc
 
     if not isinstance(payload, dict):
-        return None
+        raise OpenFoodFactsFetchError("Open Food Facts payload is not a JSON object")
+
     return parse_open_food_facts_product(payload, barcode)
