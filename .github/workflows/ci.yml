@@ -30,3 +30,13 @@ jobs:
 
       - name: Run pytest
         run: pytest -q
+
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t product-discover-agent:test .

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies import get_barcode_job_processor, get_db_connection
+from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
@@ -95,15 +95,23 @@ def create_source_endpoint(
     return SourceRegistryResponse.model_validate(source.model_dump())
 
 
-@router.get("/sources", response_model=list[SourceRegistryResponse])
+@router.get(
+    "/sources",
+    response_model=list[SourceRegistryResponse],
+    status_code=status.HTTP_200_OK,
+)
 def list_sources_endpoint(
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
 ) -> list[SourceRegistryResponse]:
     sources = list_active_sources(connection)
-    return [SourceRegistryResponse.model_validate(item.model_dump()) for item in sources]
+    return [SourceRegistryResponse.model_validate(source.model_dump()) for source in sources]
 
 
-@router.get("/sources/{source_id}", response_model=SourceRegistryResponse)
+@router.get(
+    "/sources/{source_id}",
+    response_model=SourceRegistryResponse,
+    status_code=status.HTTP_200_OK,
+)
 def get_source_endpoint(
     source_id: str,
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
@@ -114,10 +122,15 @@ def get_source_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source not found: {source_id}",
         )
+
     return SourceRegistryResponse.model_validate(source.model_dump())
 
 
-@router.patch("/sources/{source_id}/active", response_model=SourceRegistryResponse)
+@router.patch(
+    "/sources/{source_id}/active",
+    response_model=SourceRegistryResponse,
+    status_code=status.HTTP_200_OK,
+)
 def patch_source_active_endpoint(
     source_id: str,
     payload: SourceActiveStatusRequest,
@@ -129,6 +142,7 @@ def patch_source_active_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source not found: {source_id}",
         )
+
     return SourceRegistryResponse.model_validate(source.model_dump())
 
 
@@ -142,7 +156,7 @@ def process_job(
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
     processor: Annotated[
         Callable[[sqlite3.Connection, str], DiscoveryJob | None],
-        Depends(get_barcode_job_processor),
+        Depends(get_discovery_job_processor),
     ],
 ) -> JobProcessResponse:
     try:
@@ -159,8 +173,12 @@ def process_job(
     return JobProcessResponse.model_validate(job.model_dump())
 
 
-@router.get("/products/by-barcode/{barcode}", response_model=ProductReadResponse)
-def get_product_by_barcode_endpoint(
+@router.get(
+    "/products/by-barcode/{barcode}",
+    response_model=ProductReadResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_product_by_barcode(
     barcode: str,
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
 ) -> ProductReadResponse:
@@ -168,13 +186,18 @@ def get_product_by_barcode_endpoint(
     if product is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Product not found: {barcode}",
+            detail=f"Product not found for barcode: {barcode}",
         )
+
     return ProductReadResponse.model_validate(product.model_dump())
 
 
-@router.get("/products/{product_id}", response_model=ProductReadResponse)
-def get_product_endpoint(
+@router.get(
+    "/products/{product_id}",
+    response_model=ProductReadResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_product(
     product_id: str,
     connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
 ) -> ProductReadResponse:
@@ -184,4 +207,5 @@ def get_product_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product not found: {product_id}",
         )
+
     return ProductReadResponse.model_validate(product.model_dump())

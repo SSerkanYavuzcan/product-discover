@@ -5,12 +5,12 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_barcode_job_processor, get_db_connection
+from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.jobs.models import DiscoveryJob, JobPriority, JobStatus, JobType
-from app.jobs.repository import create_discovery_job
+from app.jobs.repository import create_discovery_job, update_discovery_job_status
 from app.main import app
 from app.models import ConfidenceScore, ProductProfile, SourceEvidence
-from app.models.repository import get_product_by_barcode
+from app.models.repository import create_product, get_product_by_barcode
 from app.processing.barcode_job import process_barcode_lookup_job
 from app.storage.database import get_connection, initialize_database
 
@@ -69,7 +69,7 @@ def test_process_job_success(tmp_path) -> None:
         return process_barcode_lookup_job(connection, job_id, fetcher=fake_fetcher)
 
     app.dependency_overrides[get_db_connection] = _override_db(str(db_path))
-    app.dependency_overrides[get_barcode_job_processor] = lambda: fake_processor
+    app.dependency_overrides[get_discovery_job_processor] = lambda: fake_processor
     try:
         client = TestClient(app)
         response = client.post(f"/jobs/{job.job_id}/process")
@@ -119,7 +119,12 @@ def test_process_job_invalid_type_returns_400(tmp_path) -> None:
             ),
         )
 
+    def invalid_processor(connection: sqlite3.Connection, job_id: str) -> DiscoveryJob | None:
+        msg = "Job is not a barcode_lookup job"
+        raise ValueError(msg)
+
     app.dependency_overrides[get_db_connection] = _override_db(str(db_path))
+    app.dependency_overrides[get_discovery_job_processor] = lambda: invalid_processor
     try:
         client = TestClient(app)
         response = client.post(f"/jobs/{invalid_job.job_id}/process")
@@ -140,7 +145,7 @@ def test_process_job_not_found_result(tmp_path) -> None:
         return process_barcode_lookup_job(connection, job_id, fetcher=lambda barcode: None)
 
     app.dependency_overrides[get_db_connection] = _override_db(str(db_path))
-    app.dependency_overrides[get_barcode_job_processor] = lambda: processor_not_found
+    app.dependency_overrides[get_discovery_job_processor] = lambda: processor_not_found
     try:
         client = TestClient(app)
         response = client.post(f"/jobs/{job.job_id}/process")
@@ -164,7 +169,7 @@ def test_process_job_failed_result(tmp_path) -> None:
         return process_barcode_lookup_job(connection, job_id, fetcher=raising_fetcher)
 
     app.dependency_overrides[get_db_connection] = _override_db(str(db_path))
-    app.dependency_overrides[get_barcode_job_processor] = lambda: processor_failed
+    app.dependency_overrides[get_discovery_job_processor] = lambda: processor_failed
     try:
         client = TestClient(app)
         response = client.post(f"/jobs/{job.job_id}/process")
@@ -175,3 +180,75 @@ def test_process_job_failed_result(tmp_path) -> None:
     payload = response.json()
     assert payload["status"] == "failed"
     assert payload["error_message"] is not None
+
+
+def test_process_url_job_success(tmp_path) -> None:
+    db_path = tmp_path / "jobs_api.db"
+    initialize_database(str(db_path))
+    with get_connection(str(db_path)) as connection:
+        job = create_discovery_job(
+            connection,
+            DiscoveryJob(
+                job_id=str(uuid4()),
+                job_type=JobType.url_extraction,
+                status=JobStatus.pending,
+                priority=JobPriority.normal,
+                input_type="url",
+                input_value="https://example.com/product-page",
+            ),
+        )
+
+    def url_processor(connection: sqlite3.Connection, job_id: str) -> DiscoveryJob | None:
+        job_obj = connection.execute(
+            "SELECT * FROM discovery_jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if job_obj is None:
+            return None
+
+        product = create_product(
+            connection,
+            ProductProfile(
+                barcode="0123456789012",
+                gtin="0123456789012",
+                product_name="URL Product",
+                brand="Brand U",
+                status="discovered",
+                confidence=ConfidenceScore(overall=0.8),
+                evidence=[
+                    SourceEvidence(
+                        source_name="example.com",
+                        source_type="product_page",
+                        source_url="https://example.com/product-page",
+                        field_name="product_name",
+                        raw_value="URL Product",
+                        normalized_value="URL Product",
+                        confidence=0.8,
+                        extracted_at=datetime.now(UTC),
+                    )
+                ],
+            ),
+        )
+        return update_discovery_job_status(
+            connection,
+            job_id,
+            JobStatus.completed,
+            result_product_id=product.product_id,
+        )
+
+    app.dependency_overrides[get_db_connection] = _override_db(str(db_path))
+    app.dependency_overrides[get_discovery_job_processor] = lambda: url_processor
+    try:
+        client = TestClient(app)
+        response = client.post(f"/jobs/{job.job_id}/process")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["job_type"] == "url_extraction"
+    assert payload["result_product_id"] is not None
+
+    with get_connection(str(db_path)) as connection:
+        product = get_product_by_barcode(connection, "0123456789012")
+    assert product is not None
