@@ -1,8 +1,15 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.jobs.models import JobPriority, JobStatus, JobType
+from app.models import (
+    ConfidenceScore,
+    NutritionFacts,
+    PackageInfo,
+    ProductImage,
+    SourceEvidence,
+)
 
 
 class BarcodeIngestionRequest(BaseModel):
@@ -41,4 +48,25 @@ class JobProcessResponse(BaseModel):
     scheduled_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    updated_at: datetime
+
+
+class ProductReadResponse(BaseModel):
+    product_id: str | None = None
+    barcode: str | None = None
+    gtin: str | None = None
+    product_name: str | None = None
+    brand: str | None = None
+    manufacturer: str | None = None
+    category: str | None = None
+    description: str | None = None
+    package: PackageInfo | None = None
+    images: list[ProductImage] = Field(default_factory=list)
+    nutrition: NutritionFacts | None = None
+    ingredients: list[str] = Field(default_factory=list)
+    allergens: list[str] = Field(default_factory=list)
+    evidence: list[SourceEvidence] = Field(default_factory=list)
+    confidence: ConfidenceScore | None = None
+    status: str
+    created_at: datetime
     updated_at: datetime
