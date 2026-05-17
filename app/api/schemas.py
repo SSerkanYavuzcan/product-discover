@@ -137,3 +137,18 @@ class ExtractionRunResponse(BaseModel):
     pages_seen: int
     products_found: int
     error_message: str | None = None
+
+
+class DiscoveredUrlResponse(BaseModel):
+    url_id: str
+    source_id: str | None = None
+    url: str
+    url_hash: str
+    discovery_type: str
+    status: str
+    barcode: str | None = None
+    product_id: str | None = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    last_checked_at: datetime | None = None
+    error_message: str | None = None
