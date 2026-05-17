@@ -42,3 +42,20 @@ class JobProcessResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime
+
+class UrlIngestionRequest(BaseModel):
+    url: str
+    priority: JobPriority = JobPriority.normal
+    batch_id: str | None = None
+
+
+class UrlIngestionResponse(BaseModel):
+    job_id: str
+    job_type: JobType
+    status: JobStatus
+    priority: JobPriority
+    input_type: str
+    input_value: str
+    batch_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
