@@ -170,6 +170,34 @@ def get_discovered_url_by_hash(
     return _deserialize_discovered_url(row)
 
 
+def list_discovered_urls_by_source(
+    connection: sqlite3.Connection,
+    source_id: str,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[DiscoveredUrl]:
+    if limit <= 0:
+        limit = 100
+    limit = min(limit, 500)
+    offset = max(offset, 0)
+
+    query = """
+        SELECT * FROM discovered_urls
+        WHERE source_id = ?
+    """
+    params: list[str | int] = [source_id]
+    if status is not None:
+        query += " AND status = ?"
+        params.append(status)
+
+    query += " ORDER BY first_seen_at ASC, url ASC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    rows = connection.execute(query, tuple(params)).fetchall()
+    return [_deserialize_discovered_url(row) for row in rows]
+
+
 def update_discovered_url_status(
     connection: sqlite3.Connection,
     url_id: str,

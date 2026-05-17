@@ -2,12 +2,13 @@ import sqlite3
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
+    DiscoveredUrlResponse,
     ExtractionRunResponse,
     JobProcessResponse,
     ProductReadResponse,
@@ -29,6 +30,7 @@ from app.sources import (
     create_source,
     get_source,
     list_active_sources,
+    list_discovered_urls_by_source,
     update_source_active_status,
 )
 
@@ -161,6 +163,35 @@ def discover_source_sitemap(
         )
 
     return ExtractionRunResponse.model_validate(run.model_dump())
+
+
+@router.get(
+    "/sources/{source_id}/discovered-urls",
+    response_model=list[DiscoveredUrlResponse],
+    status_code=status.HTTP_200_OK,
+)
+def read_discovered_urls_by_source(
+    source_id: str,
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = 100,
+    offset: int = 0,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)] = None,
+) -> list[DiscoveredUrlResponse]:
+    source = get_source(connection, source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    discovered_urls = list_discovered_urls_by_source(
+        connection=connection,
+        source_id=source_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return [DiscoveredUrlResponse.model_validate(url.model_dump()) for url in discovered_urls]
 
 
 @router.get(
