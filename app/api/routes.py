@@ -13,6 +13,9 @@ from app.api.schemas import (
     DiscoveredUrlResponse,
     ExtractionRunResponse,
     JobProcessResponse,
+    ProcessedJobItemResponse,
+    ProcessManyJobsRequest,
+    ProcessManyJobsResponse,
     ProductReadResponse,
     SitemapDiscoveryRequest,
     SourceActiveStatusRequest,
@@ -88,6 +91,65 @@ def ingest_url(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return UrlIngestionResponse.model_validate(job.model_dump())
+
+
+@router.post(
+    "/jobs/process-many",
+    response_model=ProcessManyJobsResponse,
+    status_code=status.HTTP_200_OK,
+)
+def process_many_jobs(
+    payload: ProcessManyJobsRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+    processor: Annotated[
+        Callable[[sqlite3.Connection, str], DiscoveryJob | None],
+        Depends(get_discovery_job_processor),
+    ],
+) -> ProcessManyJobsResponse:
+    requested_count = len(payload.job_ids)
+    selected_job_ids = payload.job_ids[: payload.max_jobs]
+    results: list[ProcessedJobItemResponse] = []
+
+    for selected_job_id in selected_job_ids:
+        try:
+            job = processor(connection, selected_job_id)
+        except ValueError as exc:
+            results.append(
+                ProcessedJobItemResponse(
+                    job_id=selected_job_id,
+                    status="failed",
+                    error_message=str(exc),
+                )
+            )
+            continue
+
+        if job is None:
+            results.append(
+                ProcessedJobItemResponse(
+                    job_id=selected_job_id,
+                    status="not_found",
+                    error_message=f"Discovery job not found: {selected_job_id}",
+                )
+            )
+            continue
+
+        results.append(
+            ProcessedJobItemResponse(
+                job_id=job.job_id,
+                status=job.status,
+                job_type=job.job_type,
+                result_product_id=job.result_product_id,
+                error_message=job.error_message,
+            )
+        )
+
+    processed_count = len(selected_job_ids)
+    return ProcessManyJobsResponse(
+        requested_count=requested_count,
+        processed_count=processed_count,
+        skipped_count=requested_count - processed_count,
+        results=results,
+    )
 
 
 @router.post(
