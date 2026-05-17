@@ -152,3 +152,19 @@ class DiscoveredUrlResponse(BaseModel):
     last_seen_at: datetime
     last_checked_at: datetime | None = None
     error_message: str | None = None
+
+
+class DiscoveredUrlJobCreationRequest(BaseModel):
+    status: str = "discovered"
+    limit: int = Field(default=50, ge=1, le=500)
+    priority: JobPriority = JobPriority.normal
+    batch_id: str | None = None
+
+
+class DiscoveredUrlJobCreationResponse(BaseModel):
+    source_id: str
+    status_filter: str
+    requested_limit: int
+    created_count: int
+    skipped_count: int
+    job_ids: list[str] = Field(default_factory=list)

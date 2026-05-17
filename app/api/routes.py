@@ -8,6 +8,8 @@ from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
+    DiscoveredUrlJobCreationRequest,
+    DiscoveredUrlJobCreationResponse,
     DiscoveredUrlResponse,
     ExtractionRunResponse,
     JobProcessResponse,
@@ -25,6 +27,7 @@ from app.ingestion.barcode import create_barcode_lookup_job
 from app.ingestion.url import create_url_extraction_job
 from app.jobs.models import DiscoveryJob
 from app.models.repository import get_product, get_product_by_barcode
+from app.processing.discovered_url_jobs import create_url_extraction_jobs_from_discovered_urls
 from app.sources import (
     SourceRegistry,
     create_source,
@@ -192,6 +195,40 @@ def read_discovered_urls_by_source(
         offset=offset,
     )
     return [DiscoveredUrlResponse.model_validate(url.model_dump()) for url in discovered_urls]
+
+
+@router.post(
+    "/sources/{source_id}/discovered-urls/create-jobs",
+    response_model=DiscoveredUrlJobCreationResponse,
+    status_code=status.HTTP_200_OK,
+)
+def create_jobs_from_discovered_urls(
+    source_id: str,
+    payload: DiscoveredUrlJobCreationRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> DiscoveredUrlJobCreationResponse:
+    result = create_url_extraction_jobs_from_discovered_urls(
+        connection=connection,
+        source_id=source_id,
+        status=payload.status,
+        limit=payload.limit,
+        priority=payload.priority,
+        batch_id=payload.batch_id,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    return DiscoveredUrlJobCreationResponse(
+        source_id=result.source_id,
+        status_filter=result.status_filter,
+        requested_limit=result.requested_limit,
+        created_count=result.created_count,
+        skipped_count=result.skipped_count,
+        job_ids=result.job_ids,
+    )
 
 
 @router.get(
