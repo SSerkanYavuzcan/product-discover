@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 from app.config import get_settings
 from app.jobs.models import DiscoveryJob
 from app.processing.barcode_job import process_barcode_lookup_job
+from app.processing.dispatcher import process_discovery_job
 from app.storage.database import get_connection, initialize_database
 
 
@@ -20,3 +21,7 @@ def get_db_connection() -> Iterator[sqlite3.Connection]:
 
 def get_barcode_job_processor() -> Callable[[sqlite3.Connection, str], DiscoveryJob | None]:
     return process_barcode_lookup_job
+
+
+def get_discovery_job_processor() -> Callable[[sqlite3.Connection, str], DiscoveryJob | None]:
+    return process_discovery_job
