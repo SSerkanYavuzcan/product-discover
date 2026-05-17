@@ -9,10 +9,12 @@ from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
     JobProcessResponse,
+    ProductReadResponse,
 )
 from app.config import get_settings
 from app.ingestion.barcode import create_barcode_lookup_job
 from app.jobs.models import DiscoveryJob
+from app.models.repository import get_product, get_product_by_barcode
 
 router = APIRouter()
 
@@ -70,3 +72,41 @@ def process_job(
         )
 
     return JobProcessResponse.model_validate(job.model_dump())
+
+
+@router.get(
+    "/products/by-barcode/{barcode}",
+    response_model=ProductReadResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_product_by_barcode(
+    barcode: str,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> ProductReadResponse:
+    product = get_product_by_barcode(connection, barcode)
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product not found for barcode: {barcode}",
+        )
+
+    return ProductReadResponse.model_validate(product.model_dump())
+
+
+@router.get(
+    "/products/{product_id}",
+    response_model=ProductReadResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_product(
+    product_id: str,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> ProductReadResponse:
+    product = get_product(connection, product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product not found: {product_id}",
+        )
+
+    return ProductReadResponse.model_validate(product.model_dump())
