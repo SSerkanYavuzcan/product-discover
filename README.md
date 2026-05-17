@@ -32,11 +32,11 @@ The API will be available at `http://127.0.0.1:8000`.
 ## Run tests
 
 ```bash
-pytest
+python -m pytest
 ```
 
 ## Lint
 
 ```bash
-ruff check .
+python -m ruff check .
 ```
