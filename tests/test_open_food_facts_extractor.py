@@ -1,7 +1,12 @@
 import json
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
+
+import pytest
 
 from app.extractors.open_food_facts import (
+    OPEN_FOOD_FACTS_ACCEPT_HEADER,
+    OPEN_FOOD_FACTS_USER_AGENT,
+    OpenFoodFactsFetchError,
     build_open_food_facts_url,
     fetch_open_food_facts_product,
     parse_open_food_facts_product,
@@ -80,6 +85,22 @@ class _MockResponse:
         return None
 
 
+def test_fetch_sends_user_agent_and_accept_headers(monkeypatch) -> None:
+    captured = {}
+
+    def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
+        captured["request"] = request
+        return _MockResponse(json.dumps({"status": 0}))
+
+    monkeypatch.setattr("app.extractors.open_food_facts.urlopen", mock_urlopen)
+
+    fetch_open_food_facts_product("12345678")
+
+    request = captured["request"]
+    assert request.headers.get("User-agent") == OPEN_FOOD_FACTS_USER_AGENT
+    assert request.headers.get("Accept") == OPEN_FOOD_FACTS_ACCEPT_HEADER
+
+
 def test_fetch_returns_product_when_urlopen_mocked(monkeypatch) -> None:
     payload = {
         "status": 1,
@@ -92,7 +113,7 @@ def test_fetch_returns_product_when_urlopen_mocked(monkeypatch) -> None:
         },
     }
 
-    def mock_urlopen(url: str, timeout: float):  # noqa: ARG001
+    def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
         return _MockResponse(json.dumps(payload))
 
     monkeypatch.setattr("app.extractors.open_food_facts.urlopen", mock_urlopen)
@@ -103,17 +124,55 @@ def test_fetch_returns_product_when_urlopen_mocked(monkeypatch) -> None:
     assert profile.product_name == "Test Product"
 
 
-def test_fetch_returns_none_when_urlopen_raises(monkeypatch) -> None:
-    def mock_urlopen(url: str, timeout: float):  # noqa: ARG001
+def test_fetch_returns_none_when_status_is_not_found(monkeypatch) -> None:
+    def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
+        return _MockResponse(json.dumps({"status": 0}))
+
+    monkeypatch.setattr("app.extractors.open_food_facts.urlopen", mock_urlopen)
+    assert fetch_open_food_facts_product("12345678") is None
+
+
+def test_fetch_raises_open_food_facts_fetch_error_for_url_error(monkeypatch) -> None:
+    def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
         raise URLError("network down")
 
     monkeypatch.setattr("app.extractors.open_food_facts.urlopen", mock_urlopen)
-    assert fetch_open_food_facts_product("12345678") is None
+
+    with pytest.raises(OpenFoodFactsFetchError, match="network error"):
+        fetch_open_food_facts_product("12345678")
 
 
-def test_fetch_returns_none_for_invalid_json(monkeypatch) -> None:
-    def mock_urlopen(url: str, timeout: float):  # noqa: ARG001
+def test_fetch_raises_open_food_facts_fetch_error_for_http_error(monkeypatch) -> None:
+    def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
+        raise HTTPError(
+            url="https://example.com",
+            code=503,
+            msg="Service Unavailable",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr("app.extractors.open_food_facts.urlopen", mock_urlopen)
+
+    with pytest.raises(OpenFoodFactsFetchError, match="HTTP error: 503"):
+        fetch_open_food_facts_product("12345678")
+
+
+def test_fetch_raises_open_food_facts_fetch_error_for_invalid_json(monkeypatch) -> None:
+    def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
         return _MockResponse("not json")
 
     monkeypatch.setattr("app.extractors.open_food_facts.urlopen", mock_urlopen)
-    assert fetch_open_food_facts_product("12345678") is None
+
+    with pytest.raises(OpenFoodFactsFetchError, match="invalid JSON"):
+        fetch_open_food_facts_product("12345678")
+
+
+def test_fetch_raises_open_food_facts_fetch_error_when_payload_is_not_dict(monkeypatch) -> None:
+    def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
+        return _MockResponse(json.dumps([1, 2, 3]))
+
+    monkeypatch.setattr("app.extractors.open_food_facts.urlopen", mock_urlopen)
+
+    with pytest.raises(OpenFoodFactsFetchError, match="not a JSON object"):
+        fetch_open_food_facts_product("12345678")
