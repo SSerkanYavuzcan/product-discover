@@ -2,7 +2,7 @@ import sqlite3
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from app.models.evidence import ConfidenceScore, SourceEvidence
+from app.models.evidence import ConfidenceScore, ProductImage, SourceEvidence
 from app.models.product import ProductProfile
 
 
@@ -39,10 +39,80 @@ def _deserialize_evidence(row: sqlite3.Row) -> SourceEvidence:
     )
 
 
+def _hydrate_product_from_evidence(
+    product: ProductProfile, evidence: list[SourceEvidence]
+) -> ProductProfile:
+    hydrated = product.model_copy(deep=True)
+    if not evidence:
+        return hydrated
+
+    field_max_confidence: dict[str, float] = {}
+    for item in evidence:
+        previous = field_max_confidence.get(item.field_name)
+        if previous is None or item.confidence > previous:
+            field_max_confidence[item.field_name] = item.confidence
+
+    if hydrated.description is None:
+        description_evidence = [item for item in evidence if item.field_name == "description"]
+        if description_evidence:
+            winner = max(
+                description_evidence, key=lambda item: (item.confidence, item.extracted_at)
+            )
+            value = (
+                winner.normalized_value
+                if winner.normalized_value is not None
+                else winner.raw_value
+            )
+            if value is not None:
+                hydrated.description = str(value)
+
+    if not hydrated.images:
+        image_evidence = [item for item in evidence if item.field_name in {"image", "image_url"}]
+        sorted_image_evidence = sorted(
+            image_evidence,
+            key=lambda item: (item.confidence, item.extracted_at),
+            reverse=True,
+        )
+        seen_urls: set[str] = set()
+        hydrated_images: list[ProductImage] = []
+        for item in sorted_image_evidence:
+            value = item.normalized_value if item.normalized_value is not None else item.raw_value
+            if value is None:
+                continue
+            image_url = str(value).strip()
+            if not image_url or image_url in seen_urls:
+                continue
+            seen_urls.add(image_url)
+            hydrated_images.append(
+                ProductImage(
+                    url=image_url,
+                    image_type="main" if not hydrated_images else "gallery",
+                    source_url=item.source_url,
+                    confidence=item.confidence,
+                )
+            )
+        hydrated.images = hydrated_images
+
+    if hydrated.confidence is not None:
+        merged_scores = dict(hydrated.confidence.field_scores)
+        for field_name, score in field_max_confidence.items():
+            if field_name not in merged_scores:
+                merged_scores[field_name] = score
+        hydrated.confidence = ConfidenceScore(
+            overall=hydrated.confidence.overall,
+            field_scores=merged_scores,
+        )
+    else:
+        overall = round(sum(item.confidence for item in evidence) / len(evidence), 3)
+        hydrated.confidence = ConfidenceScore(overall=overall, field_scores=field_max_confidence)
+
+    return hydrated
+
+
 def _deserialize_product(row: sqlite3.Row, evidence: list[SourceEvidence]) -> ProductProfile:
     confidence_value = row["confidence_overall"]
     confidence = ConfidenceScore(overall=confidence_value) if confidence_value is not None else None
-    return ProductProfile(
+    product = ProductProfile(
         product_id=row["product_id"],
         barcode=row["barcode"],
         gtin=row["gtin"],
@@ -55,6 +125,7 @@ def _deserialize_product(row: sqlite3.Row, evidence: list[SourceEvidence]) -> Pr
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
+    return _hydrate_product_from_evidence(product, evidence)
 
 
 def create_product(connection: sqlite3.Connection, product: ProductProfile) -> ProductProfile:
