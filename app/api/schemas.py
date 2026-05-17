@@ -121,3 +121,19 @@ class SourceRegistryResponse(BaseModel):
 
 class SourceActiveStatusRequest(BaseModel):
     is_active: bool
+
+
+class SitemapDiscoveryRequest(BaseModel):
+    max_child_sitemaps: int = Field(default=5, ge=0)
+    product_only: bool = True
+
+
+class ExtractionRunResponse(BaseModel):
+    run_id: str
+    source_id: str | None = None
+    status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    pages_seen: int
+    products_found: int
+    error_message: str | None = None
