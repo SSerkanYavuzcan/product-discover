@@ -50,6 +50,7 @@ def create_url_extraction_jobs_from_discovered_urls(
                 url=discovered_url.url,
                 priority=priority,
                 batch_id=batch_id,
+                source_id=source_id,
             )
         except ValueError:
             skipped_count += 1
