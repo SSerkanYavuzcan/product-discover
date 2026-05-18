@@ -62,7 +62,27 @@ def _count(connection: sqlite3.Connection, query: str, params: tuple[object, ...
     row = connection.execute(query, params).fetchone()
     if row is None:
         return 0
-    value = row[0]
+    value: object | None = None
+
+    try:
+        value = row[0]
+    except (KeyError, IndexError, TypeError):
+        values_attr = getattr(row, "values", None)
+        if callable(values_attr):
+            values = list(values_attr())
+            if values:
+                value = values[0]
+
+        if value is None:
+            get_attr = getattr(row, "get", None)
+            if callable(get_attr):
+                value = get_attr("count")
+            else:
+                try:
+                    value = row["count"]
+                except (KeyError, TypeError):
+                    value = None
+
     return int(value) if value is not None else 0
 
 
@@ -75,7 +95,7 @@ def get_dashboard_summary(connection: sqlite3.Connection) -> DashboardSummary:
     total_discovered_urls = _count(connection, "SELECT COUNT(*) FROM discovered_urls")
     discovered_urls_today = _count(
         connection,
-        "SELECT COUNT(*) FROM discovered_urls WHERE DATE(first_seen_at) = ?",
+        "SELECT COUNT(*) FROM discovered_urls WHERE substr(first_seen_at, 1, 10) = ?",
         (today_utc,),
     )
     queued_urls = _count(
@@ -91,7 +111,7 @@ def get_dashboard_summary(connection: sqlite3.Connection) -> DashboardSummary:
     total_products = _count(connection, "SELECT COUNT(*) FROM products")
     products_today = _count(
         connection,
-        "SELECT COUNT(*) FROM products WHERE DATE(created_at) = ?",
+        "SELECT COUNT(*) FROM products WHERE substr(created_at, 1, 10) = ?",
         (today_utc,),
     )
     discovered_products = _count(
