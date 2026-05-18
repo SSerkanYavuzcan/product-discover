@@ -244,3 +244,24 @@ class DashboardSummaryResponse(BaseModel):
     products: DashboardProductsSummaryResponse
     jobs: DashboardJobsSummaryResponse
     latest_run: DashboardLatestRunSummaryResponse | None = None
+
+
+class DashboardActivityItemResponse(BaseModel):
+    event_id: str
+    event_type: str
+    title: str
+    message: str
+    source_id: str | None = None
+    source_name: str | None = None
+    product_id: str | None = None
+    job_id: str | None = None
+    run_id: str | None = None
+    status: str | None = None
+    event_time: str
+
+
+class DashboardActivityResponse(BaseModel):
+    items: list[DashboardActivityItemResponse] = Field(default_factory=list)
+    count: int
+    limit: int
+    source_id: str | None = None
