@@ -61,7 +61,7 @@ def test_filter_product_urls_and_heuristics() -> None:
     urls = [
         "https://shop.example.com/product/widget-1",
         "https://shop.example.com/category/widgets",
-        "https://shop.example.com/kategori/test-product-slug-long",
+        "https://shop.example.com/item/test-product-slug-long",
         "https://shop.example.com/assets/logo.png",
         "https://shop.example.com/login",
     ]
@@ -71,7 +71,7 @@ def test_filter_product_urls_and_heuristics() -> None:
 
     assert filter_product_urls(urls) == [
         "https://shop.example.com/product/widget-1",
-        "https://shop.example.com/kategori/test-product-slug-long",
+        "https://shop.example.com/item/test-product-slug-long",
     ]
 
 
