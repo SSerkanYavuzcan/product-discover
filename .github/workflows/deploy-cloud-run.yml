@@ -44,6 +44,7 @@ jobs:
           DATABASE_BACKEND_INPUT: ${{ vars.DATABASE_BACKEND }}
           CLOUD_SQL_CONNECTION_NAME: ${{ vars.CLOUD_SQL_CONNECTION_NAME }}
           DATABASE_SECRET_NAME: ${{ vars.DATABASE_SECRET_NAME }}
+          ALLOWED_ORIGINS_INPUT: ${{ vars.ALLOWED_ORIGINS }}
         run: |
           set -euo pipefail
 
@@ -52,7 +53,7 @@ jobs:
           DATABASE_BACKEND="${DATABASE_BACKEND//[[:space:]]/}"
 
           if [[ -z "$DATABASE_BACKEND" || "$DATABASE_BACKEND" == "sqlite" ]]; then
-            DEPLOY_ENV_VARS="APP_NAME=product-discover-agent,ENVIRONMENT=production,LOG_LEVEL=INFO,DATABASE_BACKEND=sqlite,DATABASE_PATH=/tmp/product_discover_agent.db"
+            DEPLOY_ENV_VARS="APP_NAME=product-discover-agent|ENVIRONMENT=production|LOG_LEVEL=INFO|DATABASE_BACKEND=sqlite|DATABASE_PATH=/tmp/product_discover_agent.db"
             CLOUD_SQL_FLAGS=""
             SECRET_FLAGS=""
           elif [[ "$DATABASE_BACKEND" == "postgres" ]]; then
@@ -66,13 +67,23 @@ jobs:
               exit 1
             fi
 
-            DEPLOY_ENV_VARS="APP_NAME=product-discover-agent,ENVIRONMENT=production,LOG_LEVEL=INFO,DATABASE_BACKEND=postgres"
+            DEPLOY_ENV_VARS="APP_NAME=product-discover-agent|ENVIRONMENT=production|LOG_LEVEL=INFO|DATABASE_BACKEND=postgres"
             CLOUD_SQL_FLAGS="--add-cloudsql-instances=${CLOUD_SQL_CONNECTION_NAME}"
             SECRET_FLAGS="--set-secrets=DATABASE_URL=${DATABASE_SECRET_NAME}:latest"
           else
             echo "Error: DATABASE_BACKEND must be one of: sqlite, postgres. Received: '${DATABASE_BACKEND_INPUT}'." >&2
             exit 1
           fi
+
+          ALLOWED_ORIGINS="${ALLOWED_ORIGINS_INPUT:-}"
+          ALLOWED_ORIGINS="${ALLOWED_ORIGINS#${ALLOWED_ORIGINS%%[![:space:]]*}}"
+          ALLOWED_ORIGINS="${ALLOWED_ORIGINS%${ALLOWED_ORIGINS##*[![:space:]]}}"
+
+          if [[ -n "$ALLOWED_ORIGINS" ]]; then
+            DEPLOY_ENV_VARS+="|ALLOWED_ORIGINS=${ALLOWED_ORIGINS}"
+          fi
+
+          DEPLOY_ENV_VARS="^|^${DEPLOY_ENV_VARS}"
 
           echo "deploy_env_vars=${DEPLOY_ENV_VARS}" >> "$GITHUB_OUTPUT"
           echo "cloud_sql_flags=${CLOUD_SQL_FLAGS}" >> "$GITHUB_OUTPUT"
@@ -86,7 +97,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --max-instances=1 \
-            --set-env-vars "${{ steps.deploy-config.outputs.deploy_env_vars }}" \
+            --set-env-vars="${{ steps.deploy-config.outputs.deploy_env_vars }}" \
             ${{ steps.deploy-config.outputs.cloud_sql_flags }} \
             ${{ steps.deploy-config.outputs.secret_flags }}
           # Note: --max-instances=1 remains for demo-safety; PostgreSQL production can scale above 1 after load testing.
