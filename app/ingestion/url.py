@@ -21,6 +21,7 @@ def create_url_extraction_job(
     url: str,
     priority: JobPriority = JobPriority.normal,
     batch_id: str | None = None,
+    source_id: str | None = None,
 ) -> DiscoveryJob:
     normalized = normalize_url(url)
     if not is_valid_url(normalized):
@@ -35,5 +36,6 @@ def create_url_extraction_job(
         input_type="url",
         input_value=normalized,
         batch_id=batch_id,
+        source_id=source_id,
     )
     return create_discovery_job(connection, job)
