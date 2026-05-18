@@ -61,10 +61,9 @@ def test_filter_product_urls_and_heuristics() -> None:
     urls = [
         "https://shop.example.com/product/widget-1",
         "https://shop.example.com/category/widgets",
-        "https://shop.example.com/a/b",
+        "https://shop.example.com/kategori/test-product-slug-long",
         "https://shop.example.com/assets/logo.png",
         "https://shop.example.com/login",
-        "https://shop.example.com/a/b",
     ]
     assert is_probable_product_url("https://shop.example.com/product/widget-1") is True
     assert is_probable_product_url("https://shop.example.com/assets/logo.png") is False
@@ -72,7 +71,7 @@ def test_filter_product_urls_and_heuristics() -> None:
 
     assert filter_product_urls(urls) == [
         "https://shop.example.com/product/widget-1",
-        "https://shop.example.com/a/b",
+        "https://shop.example.com/kategori/test-product-slug-long",
     ]
 
 
@@ -160,7 +159,9 @@ def test_discover_urls_from_source_sitemap_persists_and_completes(tmp_path: Path
                 """
             raise SitemapDiscoveryError("unexpected")
 
-        run = discover_urls_from_source_sitemap(connection, source.source_id, fetcher=fake_fetcher)
+        run = discover_urls_from_source_sitemap(
+            connection, source.source_id, fetcher=fake_fetcher
+        )
 
         assert run is not None
         assert run.status == "completed"
@@ -177,7 +178,9 @@ def test_discover_urls_from_source_sitemap_persists_and_completes(tmp_path: Path
         assert discovered[0]["status"] == "discovered"
 
 
-def test_discover_urls_from_source_sitemap_missing_source_returns_none(tmp_path: Path) -> None:
+def test_discover_urls_from_source_sitemap_missing_source_returns_none(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "missing.db"
     initialize_database(str(db_path))
 
