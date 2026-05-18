@@ -84,7 +84,63 @@ def list_active_sources(connection: sqlite3.Connection) -> list[SourceRegistry]:
     ).fetchall()
     return [_deserialize_source(row) for row in rows]
 
+def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> bool:
+    """
+    Hard-deletes a source and all its associated data (URLs, runs, jobs, products) from the database.
+    Returns True if the source was found and deleted, False otherwise.
+    """
+    existing = get_source(connection, source_id)
+    if existing is None:
+        return False
 
+    # To avoid foreign key constraint errors, we delete child records first.
+    # Note: If your tables are set up with ON DELETE CASCADE, some of these might be redundant, 
+    # but it's safer to explicitly delete them here.
+    
+    try:
+        # 1. Delete associated products and their evidence/images
+        # Find all product_ids associated with this source's discovered URLs
+        product_rows = connection.execute(
+            "SELECT DISTINCT product_id FROM discovered_urls WHERE source_id = ? AND product_id IS NOT NULL",
+            (source_id,)
+        ).fetchall()
+        
+        for row in product_rows:
+            pid = row["product_id"]
+            connection.execute("DELETE FROM product_evidence WHERE product_id = ?", (pid,))
+            connection.execute("DELETE FROM product_images WHERE product_id = ?", (pid,))
+            connection.execute("DELETE FROM products WHERE product_id = ?", (pid,))
+
+        # 2. Delete jobs associated with this source's URLs
+        connection.execute(
+            """
+            DELETE FROM url_extraction_jobs 
+            WHERE url_id IN (SELECT url_id FROM discovered_urls WHERE source_id = ?)
+            """,
+            (source_id,)
+        )
+
+        # 3. Delete discovered URLs
+        connection.execute("DELETE FROM discovered_urls WHERE source_id = ?", (source_id,))
+
+        # 4. Delete extraction runs
+        connection.execute("DELETE FROM extraction_runs WHERE source_id = ?", (source_id,))
+
+        # 5. Finally, delete the source itself
+        connection.execute("DELETE FROM source_registry WHERE source_id = ?", (source_id,))
+        
+        # 6. Delete Dashboard Activity associated with this source (if table exists)
+        try:
+            connection.execute("DELETE FROM dashboard_activity WHERE source_id = ?", (source_id,))
+        except sqlite3.OperationalError:
+            pass # Table might not exist or be named differently, safe to ignore
+
+        connection.commit()
+        return True
+    except Exception as e:
+        connection.rollback()
+        raise RuntimeError(f"Failed to completely delete source {source_id}: {e}") from e
+        
 def update_source_active_status(
     connection: sqlite3.Connection,
     source_id: str,
