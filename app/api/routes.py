@@ -9,6 +9,8 @@ from app.api.dependencies import get_db_connection, get_discovery_job_processor
 from app.api.schemas import (
     BarcodeIngestionRequest,
     BarcodeIngestionResponse,
+    DashboardActivityItemResponse,
+    DashboardActivityResponse,
     DashboardSummaryResponse,
     DiscoveredUrlJobCreationRequest,
     DiscoveredUrlJobCreationResponse,
@@ -28,7 +30,7 @@ from app.api.schemas import (
     UrlIngestionResponse,
 )
 from app.config import get_settings
-from app.dashboard import get_dashboard_summary
+from app.dashboard import get_dashboard_activity, get_dashboard_summary
 from app.discovery import discover_urls_from_source_sitemap
 from app.ingestion.barcode import create_barcode_lookup_job
 from app.ingestion.url import create_url_extraction_job
@@ -65,6 +67,27 @@ def read_dashboard_summary(
 ) -> DashboardSummaryResponse:
     summary = get_dashboard_summary(connection)
     return DashboardSummaryResponse.model_validate(asdict(summary))
+
+
+@router.get(
+    "/dashboard/activity",
+    response_model=DashboardActivityResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_dashboard_activity(
+    limit: int = 50,
+    source_id: str | None = None,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)] = None,
+) -> DashboardActivityResponse:
+    normalized_limit = 50 if limit <= 0 else min(limit, 100)
+    activity_items = get_dashboard_activity(connection, limit=limit, source_id=source_id)
+    items = [DashboardActivityItemResponse.model_validate(asdict(item)) for item in activity_items]
+    return DashboardActivityResponse(
+        items=items,
+        count=len(items),
+        limit=normalized_limit,
+        source_id=source_id,
+    )
 
 
 @router.post(
