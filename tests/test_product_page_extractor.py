@@ -74,6 +74,7 @@ def test_extract_product_from_html_prefers_json_ld() -> None:
 def test_extract_product_from_html_falls_back_to_open_graph() -> None:
     html = """
     <html><head>
+    <meta property="product:price:amount" content="10.00" />
     <meta property="og:title" content="OG Product" />
     <meta property="og:description" content="OG Desc" />
     <meta property="og:image" content="https://example.com/og.jpg" />
@@ -89,8 +90,10 @@ def test_extract_product_from_html_falls_back_to_open_graph() -> None:
 def test_extract_product_from_html_falls_back_to_title_and_meta_description() -> None:
     html = """
     <html><head>
+    <meta property="product:brand" content="Generic Brand" />
     <title>Title Product</title>
     <meta name="description" content="Meta Desc" />
+    <meta property="og:image" content="https://example.com/meta.jpg" />
     </head><body></body></html>
     """
     profile = extract_product_from_html(html, "https://example.com/p")
@@ -101,10 +104,16 @@ def test_extract_product_from_html_falls_back_to_title_and_meta_description() ->
 
 def test_extract_product_from_html_sets_barcode_and_gtin_when_hint_found() -> None:
     html = """
-    <html><head><title>Product</title></head>
+    <html><head>
+    <meta property="product:price:amount" content="25.00" />
+    <title>Product</title>
+    <meta property="og:image" content="https://example.com/barcode.jpg" />
+    </head>
     <body>Barcode: 3017620422003</body></html>
     """
-    profile = extract_product_from_html(html, "https://example.com/p", barcode_hint="3017620422003")
+    profile = extract_product_from_html(
+        html, "https://example.com/p", barcode_hint="3017620422003"
+    )
     assert profile is not None
     assert profile.barcode == "3017620422003"
     assert profile.gtin == "3017620422003"
@@ -117,7 +126,11 @@ def test_extract_product_from_html_returns_none_without_useful_signal() -> None:
 
 def test_extracted_profile_includes_evidence_and_confidence_range() -> None:
     html = """
-    <html><head><meta property="og:title" content="OG Product" /></head><body></body></html>
+    <html><head>
+    <meta property="product:price:currency" content="TRY" />
+    <meta property="og:title" content="OG Product" />
+    <meta property="og:image" content="https://example.com/evidence.jpg" />
+    </head><body></body></html>
     """
     profile = extract_product_from_html(html, "https://example.com/p")
     assert profile is not None
@@ -170,7 +183,11 @@ def test_fetch_product_page_html_raises_on_url_error(monkeypatch) -> None:
 
 def test_extract_product_from_url_calls_fetch_and_parse(monkeypatch) -> None:
     html = """
-    <html><head><meta property="og:title" content="From URL" /></head><body></body></html>
+    <html><head>
+    <meta property="product:condition" content="new" />
+    <meta property="og:title" content="From URL" />
+    <meta property="og:image" content="https://example.com/url.jpg" />
+    </head><body></body></html>
     """
 
     def mock_urlopen(request, timeout: float):  # noqa: ANN001,ARG001
