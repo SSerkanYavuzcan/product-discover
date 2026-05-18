@@ -363,7 +363,7 @@ def update_extraction_run_status(
 
 def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> bool:
     """
-    Hard-deletes a source and all its associated data (URLs, runs, jobs, products).
+    Hard-deletes a source and all its associated data safely.
     """
     existing = get_source(connection, source_id)
     if existing is None:
@@ -371,32 +371,50 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
 
     try:
         product_rows = connection.execute(
-            "SELECT DISTINCT product_id FROM discovered_urls WHERE source_id = ? "
-            "AND product_id IS NOT NULL",
+            """
+            SELECT DISTINCT product_id
+            FROM discovered_urls
+            WHERE source_id = ?
+              AND product_id IS NOT NULL
+            """,
             (source_id,),
         ).fetchall()
 
-        for row in product_rows:
-            pid = row["product_id"]
-            connection.execute("DELETE FROM product_evidence WHERE product_id = ?", (pid,))
-            connection.execute("DELETE FROM products WHERE product_id = ?", (pid,))
+        product_ids = [row["product_id"] for row in product_rows if row["product_id"]]
+
+        for product_id in product_ids:
+            connection.execute(
+                "DELETE FROM product_evidence WHERE product_id = ?",
+                (product_id,),
+            )
+            connection.execute(
+                "DELETE FROM products WHERE product_id = ?",
+                (product_id,),
+            )
 
         connection.execute(
-            """
-            DELETE FROM url_extraction_jobs 
-            WHERE url_id IN (SELECT url_id FROM discovered_urls WHERE source_id = ?)
-            """,
+            "DELETE FROM discovery_jobs WHERE source_id = ?",
+            (source_id,),
+        )
+        connection.execute(
+            "DELETE FROM discovered_urls WHERE source_id = ?",
+            (source_id,),
+        )
+        connection.execute(
+            "DELETE FROM extraction_runs WHERE source_id = ?",
+            (source_id,),
+        )
+        connection.execute(
+            "DELETE FROM source_registry WHERE source_id = ?",
             (source_id,),
         )
 
-        connection.execute("DELETE FROM discovered_urls WHERE source_id = ?", (source_id,))
-        connection.execute("DELETE FROM extraction_runs WHERE source_id = ?", (source_id,))
-        connection.execute("DELETE FROM source_registry WHERE source_id = ?", (source_id,))
-
         connection.commit()
         return True
+
     except Exception as e:
-        connection.rollback()
+        if hasattr(connection, "rollback"):
+            connection.rollback()
         raise RuntimeError(f"Failed to completely delete source {source_id}: {e}") from e
 
 
