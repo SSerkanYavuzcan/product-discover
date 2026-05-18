@@ -323,7 +323,6 @@ def update_extraction_run_status(
 def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> bool:
     """
     Hard-deletes a source and all its associated data (URLs, runs, jobs, products).
-    Returns True if the source was found and deleted, False otherwise.
     """
     existing = get_source(connection, source_id)
     if existing is None:
@@ -352,12 +351,6 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
         connection.execute("DELETE FROM discovered_urls WHERE source_id = ?", (source_id,))
         connection.execute("DELETE FROM extraction_runs WHERE source_id = ?", (source_id,))
         connection.execute("DELETE FROM source_registry WHERE source_id = ?", (source_id,))
-        
-        # FIX: Catch all DB exceptions for optional tables (PostgreSQL/SQLite safe)
-        try:
-            connection.execute("DELETE FROM dashboard_activity WHERE source_id = ?", (source_id,))
-        except Exception:
-            pass
 
         connection.commit()
         return True
@@ -368,16 +361,10 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
 
 def delete_all_system_data(connection: sqlite3.Connection) -> None:
     """
-    Wipes ALL data across all Product Discover tables (Hard Reset)
-    in the strict dependency order to avoid Foreign Key constraint errors.
+    Wipes ALL data across all active Product Discover tables (Hard Reset)
+    in strict order. Non-existent tables are completely avoided.
     """
     try:
-        # FIX: Catch all DB exceptions for optional tables (PostgreSQL/SQLite safe)
-        try:
-            connection.execute("DELETE FROM dashboard_activity")
-        except Exception:
-            pass
-            
         connection.execute("DELETE FROM url_extraction_jobs")
         connection.execute("DELETE FROM discovered_urls")
         connection.execute("DELETE FROM extraction_runs")
