@@ -36,7 +36,9 @@ from app.ingestion.barcode import create_barcode_lookup_job
 from app.ingestion.url import create_url_extraction_job
 from app.jobs.models import DiscoveryJob
 from app.models.repository import get_product, get_product_by_barcode, list_products
-from app.processing.discovered_url_jobs import create_url_extraction_jobs_from_discovered_urls
+from app.processing.discovered_url_jobs import (
+    create_url_extraction_jobs_from_discovered_urls,
+)
 from app.sources import (
     SourceRegistry,
     create_source,
@@ -45,6 +47,7 @@ from app.sources import (
     list_discovered_urls_by_source,
     update_source_active_status,
 )
+from app.sources.repository import delete_source_completely
 
 router = APIRouter()
 
@@ -53,8 +56,6 @@ router = APIRouter()
 def health_check() -> dict[str, str]:
     settings = get_settings()
     return {"status": "ok", "service": settings.app_name}
-
-
 
 
 @router.get(
@@ -371,6 +372,25 @@ def patch_source_active_status(
         )
 
     return SourceRegistryResponse.model_validate(source.model_dump())
+
+
+@router.delete(
+    "/sources/{source_id}",
+    status_code=status.HTTP_200_OK,
+)
+def delete_registry_source_completely(
+    source_id: str,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> dict[str, str]:
+    """Hard deletes a source and all its associated data."""
+    success = delete_source_completely(connection, source_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    return {"status": "deleted", "source_id": source_id}
 
 
 @router.get(
