@@ -353,9 +353,10 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
         connection.execute("DELETE FROM extraction_runs WHERE source_id = ?", (source_id,))
         connection.execute("DELETE FROM source_registry WHERE source_id = ?", (source_id,))
         
+        # FIX: Catch all DB exceptions for optional tables (PostgreSQL/SQLite safe)
         try:
             connection.execute("DELETE FROM dashboard_activity WHERE source_id = ?", (source_id,))
-        except sqlite3.OperationalError:
+        except Exception:
             pass
 
         connection.commit()
@@ -371,25 +372,17 @@ def delete_all_system_data(connection: sqlite3.Connection) -> None:
     in the strict dependency order to avoid Foreign Key constraint errors.
     """
     try:
-        # 1. Önce bağımlı alt işleri ve aktiviteleri temizle
+        # FIX: Catch all DB exceptions for optional tables (PostgreSQL/SQLite safe)
         try:
             connection.execute("DELETE FROM dashboard_activity")
-        except sqlite3.OperationalError:
+        except Exception:
             pass
             
         connection.execute("DELETE FROM url_extraction_jobs")
-        
-        # 2. Kaynaklara ve ürünlere göbekten bağlı olan URL ve Run tablolarını uçur
         connection.execute("DELETE FROM discovered_urls")
         connection.execute("DELETE FROM extraction_runs")
-        
-        # 3. Ürünlerin kanıtlarını temizle (products tablosuna bağlıdır)
         connection.execute("DELETE FROM product_evidence")
-        
-        # 4. Artık üzerinde hiçbir kısıtlama kalmayan ürünleri sil
         connection.execute("DELETE FROM products")
-        
-        # 5. En son ana kök olan kaynak sicilini temizle
         connection.execute("DELETE FROM source_registry")
         
         connection.commit()
