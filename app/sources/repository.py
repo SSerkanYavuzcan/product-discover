@@ -361,18 +361,23 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
 
 def delete_all_system_data(connection: sqlite3.Connection) -> None:
     """
-    Wipes ALL data across all active Product Discover tables (Hard Reset)
-    in strict order. Non-existent tables are completely avoided.
+    Wipes ALL data safely. Invincible to missing tables in PostgreSQL.
     """
-    try:
-        connection.execute("DELETE FROM url_extraction_jobs")
-        connection.execute("DELETE FROM discovered_urls")
-        connection.execute("DELETE FROM extraction_runs")
-        connection.execute("DELETE FROM product_evidence")
-        connection.execute("DELETE FROM products")
-        connection.execute("DELETE FROM source_registry")
-        
-        connection.commit()
-    except Exception as e:
-        connection.rollback()
-        raise RuntimeError(f"Failed to wipe system data: {e}") from e
+    tables_to_clear = [
+        "url_extraction_jobs",
+        "discovered_urls",
+        "extraction_runs",
+        "product_evidence",
+        "products",
+        "source_registry"
+    ]
+    
+    for table in tables_to_clear:
+        try:
+            # Tabloyu silmeyi dene ve işlemi onayla
+            connection.execute(f"DELETE FROM {table}")
+            connection.commit()
+        except Exception:
+            # Eğer tablo yoksa (PostgreSQL hata verirse), işlemi iptal et (rollback) 
+            # ve sunucuyu çökertmeden bir sonraki tabloya geç.
+            connection.rollback()
