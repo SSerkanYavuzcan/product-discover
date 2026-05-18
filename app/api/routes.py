@@ -397,7 +397,7 @@ def delete_registry_source_completely(
 
 
 @router.delete(
-    "/sources/system/reset",
+    "/system/reset",
     status_code=status.HTTP_200_OK,
 )
 def reset_entire_system(
