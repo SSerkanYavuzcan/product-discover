@@ -235,6 +235,53 @@ def update_discovered_url_status(
     return _deserialize_discovered_url(row) if row is not None else None
 
 
+def update_discovered_url_by_source_and_url(
+    connection: sqlite3.Connection,
+    source_id: str | None,
+    url: str,
+    status: str,
+    error_message: str | None = None,
+    product_id: str | None = None,
+    barcode: str | None = None,
+) -> DiscoveredUrl | None:
+    url_hash = compute_url_hash(url)
+
+    row: sqlite3.Row | None = None
+    if source_id is not None:
+        row = connection.execute(
+            """
+            SELECT * FROM discovered_urls
+            WHERE source_id = ? AND (url_hash = ? OR url = ?)
+            ORDER BY first_seen_at ASC
+            LIMIT 1
+            """,
+            (source_id, url_hash, url),
+        ).fetchone()
+
+    if row is None:
+        row = connection.execute(
+            """
+            SELECT * FROM discovered_urls
+            WHERE url_hash = ? OR url = ?
+            ORDER BY first_seen_at ASC
+            LIMIT 1
+            """,
+            (url_hash, url),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return update_discovered_url_status(
+        connection=connection,
+        url_id=row["url_id"],
+        status=status,
+        error_message=error_message,
+        product_id=product_id,
+        barcode=barcode,
+    )
+
+
 def _deserialize_extraction_run(row: sqlite3.Row) -> ExtractionRun:
     return ExtractionRun(
         run_id=row["run_id"],
@@ -242,9 +289,7 @@ def _deserialize_extraction_run(row: sqlite3.Row) -> ExtractionRun:
         status=row["status"],
         started_at=datetime.fromisoformat(row["started_at"]),
         completed_at=(
-            datetime.fromisoformat(row["completed_at"])
-            if row["completed_at"] is not None
-            else None
+            datetime.fromisoformat(row["completed_at"]) if row["completed_at"] is not None else None
         ),
         pages_seen=row["pages_seen"],
         products_found=row["products_found"],
@@ -277,9 +322,7 @@ def create_extraction_run(
         ),
     )
     connection.commit()
-    row = connection.execute(
-        "SELECT * FROM extraction_runs WHERE run_id = ?", (run_id,)
-    ).fetchone()
+    row = connection.execute("SELECT * FROM extraction_runs WHERE run_id = ?", (run_id,)).fetchone()
     return _deserialize_extraction_run(row) if row is not None else stored
 
 
@@ -314,9 +357,7 @@ def update_extraction_run_status(
     )
     connection.commit()
 
-    row = connection.execute(
-        "SELECT * FROM extraction_runs WHERE run_id = ?", (run_id,)
-    ).fetchone()
+    row = connection.execute("SELECT * FROM extraction_runs WHERE run_id = ?", (run_id,)).fetchone()
     return _deserialize_extraction_run(row) if row is not None else None
 
 
@@ -332,9 +373,9 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
         product_rows = connection.execute(
             "SELECT DISTINCT product_id FROM discovered_urls WHERE source_id = ? "
             "AND product_id IS NOT NULL",
-            (source_id,)
+            (source_id,),
         ).fetchall()
-        
+
         for row in product_rows:
             pid = row["product_id"]
             connection.execute("DELETE FROM product_evidence WHERE product_id = ?", (pid,))
@@ -345,7 +386,7 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
             DELETE FROM url_extraction_jobs 
             WHERE url_id IN (SELECT url_id FROM discovered_urls WHERE source_id = ?)
             """,
-            (source_id,)
+            (source_id,),
         )
 
         connection.execute("DELETE FROM discovered_urls WHERE source_id = ?", (source_id,))
@@ -365,7 +406,7 @@ def delete_all_system_data(connection: sqlite3.Connection) -> None:
     Keeps compatibility with old/legacy tables if they exist.
     """
     tables_to_clear = [
-        "url_extraction_jobs",   # legacy / old table, may not exist
+        "url_extraction_jobs",  # legacy / old table, may not exist
         "discovery_jobs",
         "batch_jobs",
         "discovered_urls",

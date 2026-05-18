@@ -102,6 +102,38 @@ def test_extract_product_from_html_falls_back_to_title_and_meta_description() ->
     assert profile.description == "Meta Desc"
 
 
+def test_extract_product_from_html_uses_product_like_url_fallback_without_structured_data() -> None:
+    html = """
+    <html><head>
+    <meta property="og:title" content="Jacobs 18 Gr 3 Ü 1 Arada Yumuşak İçim | Kim Geldi" />
+    <meta property="og:description" content="Kahve ürünü" />
+    <meta property="og:image" content="https://example.com/jacobs.jpg" />
+    </head><body></body></html>
+    """
+    profile = extract_product_from_html(
+        html,
+        "https://www.kimgeldi.com/jacobs-18-gr-3-u-1-arada-yumusak-icim",
+    )
+
+    assert profile is not None
+    assert profile.product_name == "Jacobs 18 Gr 3 Ü 1 Arada Yumuşak İçim"
+    assert profile.images and profile.images[0].url == "https://example.com/jacobs.jpg"
+    assert profile.confidence is not None
+    assert profile.confidence.field_scores["product_name"] == 0.6
+
+
+def test_extract_product_from_html_rejects_non_product_url_fallback() -> None:
+    html = """
+    <html><head>
+    <meta property="og:title" content="Coffee Category | Store" />
+    <meta property="og:image" content="https://example.com/category.jpg" />
+    </head><body></body></html>
+    """
+
+    assert extract_product_from_html(html, "https://example.com/category/coffee-products") is None
+    assert extract_product_from_html(html, "https://example.com/cart") is None
+
+
 def test_extract_product_from_html_sets_barcode_and_gtin_when_hint_found() -> None:
     html = """
     <html><head>
@@ -111,9 +143,7 @@ def test_extract_product_from_html_sets_barcode_and_gtin_when_hint_found() -> No
     </head>
     <body>Barcode: 3017620422003</body></html>
     """
-    profile = extract_product_from_html(
-        html, "https://example.com/p", barcode_hint="3017620422003"
-    )
+    profile = extract_product_from_html(html, "https://example.com/p", barcode_hint="3017620422003")
     assert profile is not None
     assert profile.barcode == "3017620422003"
     assert profile.gtin == "3017620422003"

@@ -8,10 +8,16 @@ from app.jobs.repository import create_discovery_job
 from app.models import ConfidenceScore, ProductProfile, SourceEvidence
 from app.models.repository import get_product, get_product_by_barcode
 from app.processing.url_job import process_url_extraction_job
+from app.sources import create_discovered_url, get_discovered_url_by_hash
+from app.sources.models import DiscoveredUrl
+from app.sources.repository import compute_url_hash
 from app.storage.database import get_connection, initialize_database
 
 
-def _make_job(job_type: JobType = JobType.url_extraction) -> DiscoveryJob:
+def _make_job(
+    job_type: JobType = JobType.url_extraction,
+    source_id: str | None = None,
+) -> DiscoveryJob:
     return DiscoveryJob(
         job_id=str(uuid4()),
         job_type=job_type,
@@ -19,6 +25,7 @@ def _make_job(job_type: JobType = JobType.url_extraction) -> DiscoveryJob:
         priority=JobPriority.normal,
         input_type="url",
         input_value="https://example.com/product/3017620422003",
+        source_id=source_id,
     )
 
 
@@ -144,3 +151,95 @@ def test_process_marks_failed_when_extractor_raises(tmp_path) -> None:
     assert updated.attempt_count == 1
     assert updated.error_message is not None
     assert "URL extraction processing failed" in updated.error_message
+
+
+def test_process_marks_discovered_url_not_found_when_extractor_returns_none(tmp_path) -> None:
+    db_path = tmp_path / "url_processor_lifecycle_not_found.db"
+    initialize_database(str(db_path))
+
+    with get_connection(str(db_path)) as connection:
+        create_discovered_url(
+            connection,
+            DiscoveredUrl(
+                source_id="src-1",
+                url="https://example.com/product/3017620422003",
+                discovery_type="sitemap",
+                status="queued",
+            ),
+        )
+        job = create_discovery_job(connection, _make_job(source_id="src-1"))
+        updated = process_url_extraction_job(connection, job.job_id, extractor=lambda url: None)
+        discovered = get_discovered_url_by_hash(
+            connection,
+            compute_url_hash("https://example.com/product/3017620422003"),
+        )
+
+    assert updated is not None
+    assert updated.status == JobStatus.not_found
+    assert discovered is not None
+    assert discovered.status == "not_found"
+
+
+def test_process_marks_discovered_url_completed_with_product_id(tmp_path) -> None:
+    db_path = tmp_path / "url_processor_lifecycle_completed.db"
+    initialize_database(str(db_path))
+
+    with get_connection(str(db_path)) as connection:
+        create_discovered_url(
+            connection,
+            DiscoveredUrl(
+                source_id="src-1",
+                url="https://example.com/product/3017620422003",
+                discovery_type="sitemap",
+                status="queued",
+            ),
+        )
+        job = create_discovery_job(connection, _make_job(source_id="src-1"))
+        updated = process_url_extraction_job(
+            connection,
+            job.job_id,
+            extractor=lambda url: _make_profile(),
+        )
+        discovered = get_discovered_url_by_hash(
+            connection,
+            compute_url_hash("https://example.com/product/3017620422003"),
+        )
+
+    assert updated is not None
+    assert updated.status == JobStatus.completed
+    assert discovered is not None
+    assert discovered.status == "completed"
+    assert discovered.product_id == updated.result_product_id
+    assert discovered.barcode == "3017620422003"
+
+
+def test_process_marks_discovered_url_failed_when_extractor_raises(tmp_path) -> None:
+    db_path = tmp_path / "url_processor_lifecycle_failed.db"
+    initialize_database(str(db_path))
+
+    def exploding_extractor(url: str) -> ProductProfile | None:
+        raise RuntimeError(f"boom for {url}")
+
+    with get_connection(str(db_path)) as connection:
+        create_discovered_url(
+            connection,
+            DiscoveredUrl(
+                source_id="src-1",
+                url="https://example.com/product/3017620422003",
+                discovery_type="sitemap",
+                status="queued",
+            ),
+        )
+        job = create_discovery_job(connection, _make_job(source_id="src-1"))
+        updated = process_url_extraction_job(connection, job.job_id, extractor=exploding_extractor)
+        discovered = get_discovered_url_by_hash(
+            connection,
+            compute_url_hash("https://example.com/product/3017620422003"),
+        )
+
+    assert updated is not None
+    assert updated.status == JobStatus.failed
+    assert discovered is not None
+    assert discovered.status == "failed"
+    assert discovered.error_message is not None
+    assert "URL extraction processing failed" in discovered.error_message
