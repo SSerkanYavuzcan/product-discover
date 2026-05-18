@@ -361,23 +361,25 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
 
 def delete_all_system_data(connection: sqlite3.Connection) -> None:
     """
-    Wipes ALL data safely. Invincible to missing tables in PostgreSQL.
+    Wipes ALL product discover data safely.
+    Keeps compatibility with old/legacy tables if they exist.
     """
     tables_to_clear = [
-        "url_extraction_jobs",
+        "url_extraction_jobs",   # legacy / old table, may not exist
+        "discovery_jobs",
+        "batch_jobs",
         "discovered_urls",
         "extraction_runs",
         "product_evidence",
         "products",
-        "source_registry"
+        "source_registry",
     ]
-    
+
     for table in tables_to_clear:
         try:
-            # Tabloyu silmeyi dene ve işlemi onayla
             connection.execute(f"DELETE FROM {table}")
             connection.commit()
         except Exception:
-            # Eğer tablo yoksa (PostgreSQL hata verirse), işlemi iptal et (rollback) 
-            # ve sunucuyu çökertmeden bir sonraki tabloya geç.
-            connection.rollback()
+            if hasattr(connection, "rollback"):
+                connection.rollback()
+            continue
