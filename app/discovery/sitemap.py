@@ -76,38 +76,41 @@ def is_probable_product_url(url: str) -> bool:
     if path.endswith(static_extensions):
         return False
 
+    # Genişletilmiş engellenen kelime/desen listesi (Kategori ve kurumsal sayfalar)
     blocked_patterns = (
-        "/cart",
-        "/basket",
-        "/checkout",
-        "/login",
-        "/register",
-        "/account",
-        "/contact",
-        "/about",
-        "/blog",
-        "/category",
-        "/categories",
-        "/search",
+        "/cart", "/basket", "/checkout", "/login", "/register", "/account",
+        "/contact", "/about", "/blog", "/search", 
+        "/category", "/categories", "/kategori", "/kategoriler",
+        "/marka", "/markalar", "/brand", "/brands",
+        "/c/", "/m/", "/list/", "/kampanyalar", "/iletisim", "/hakkimizda",
+        "/sayfa", "/pages", "/policies"
     )
     if any(pattern in path for pattern in blocked_patterns):
         return False
 
     product_patterns = (
-        "/product",
-        "/products",
-        "/urun",
-        "/urunler",
-        "/p/",
-        "-p-",
-        "product-detail",
-        "productdetails",
+        "/product", "/products", "/urun", "/urunler",
+        "/p/", "-p-", "-p.", "product-detail", "productdetails",
+        ".html", "-u-"
     )
     if any(pattern in path for pattern in product_patterns):
         return True
 
+    # Eğer URL'de product kelimesi yoksa ama alt dizindeyse (örn: site.com/kategori/urun-adi)
+    # Ürün url'leri genellikle uzun olur. Kısa URL'leri (kategori olma ihtimali yüksek) eleyelim.
     segments = [segment for segment in path.split("/") if segment]
-    return len(segments) >= 2
+    
+    # Sadece /erkek-giyim gibi tek seviyeli URL'ler genellikle kategoridir, bunları ele.
+    if len(segments) < 2:
+        return False
+        
+    # Eğer segment sayısı 2 veya fazlaysa, son kısmın ürün olduğunu varsaymak için uzunluğuna bakalım.
+    # Ürün slug'ları genelde uzundur (örn: samsung-galaxy-s24-ultra-512-gb-siyah)
+    last_segment = segments[-1]
+    if len(last_segment) > 15 and "-" in last_segment:
+        return True
+
+    return False
 
 
 def filter_product_urls(urls: list[str]) -> list[str]:
