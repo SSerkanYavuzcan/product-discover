@@ -9,18 +9,69 @@ from typing import Any
 _NAMED_PLACEHOLDER_PATTERN = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 
 
+class PostgresRowAdapter:
+    def __init__(self, row: object) -> None:
+        self._row = row
+
+    def __getitem__(self, key: str | int) -> object:
+        if isinstance(key, int):
+            if isinstance(self._row, Mapping):
+                return list(self._row.values())[key]
+            if isinstance(self._row, tuple | list):
+                return self._row[key]
+            raise KeyError(key)
+
+        if isinstance(self._row, Mapping):
+            return self._row[key]
+
+        raise KeyError(key)
+
+    def get(self, key: str, default: object | None = None) -> object | None:
+        if isinstance(self._row, Mapping):
+            return self._row.get(key, default)
+        return default
+
+    def keys(self):
+        if isinstance(self._row, Mapping):
+            return self._row.keys()
+        return ()
+
+    def values(self):
+        if isinstance(self._row, Mapping):
+            return self._row.values()
+        if isinstance(self._row, tuple | list):
+            return self._row
+        return ()
+
+    def items(self):
+        if isinstance(self._row, Mapping):
+            return self._row.items()
+        return ()
+
+    def __iter__(self):
+        if isinstance(self._row, Mapping):
+            return iter(self._row)
+        if isinstance(self._row, tuple | list):
+            return iter(self._row)
+        return iter(())
+
+
 class PostgresCursorAdapter:
     def __init__(self, cursor: Any) -> None:
         self._cursor = cursor
 
-    def fetchone(self) -> Any:
-        return self._cursor.fetchone()
+    def fetchone(self) -> PostgresRowAdapter | None:
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return PostgresRowAdapter(row)
 
-    def fetchall(self) -> list[Any]:
-        return self._cursor.fetchall()
+    def fetchall(self) -> list[PostgresRowAdapter]:
+        return [PostgresRowAdapter(row) for row in self._cursor.fetchall()]
 
-    def __iter__(self) -> Iterator[Any]:
-        return iter(self._cursor)
+    def __iter__(self) -> Iterator[PostgresRowAdapter]:
+        for row in self._cursor:
+            yield PostgresRowAdapter(row)
 
 
 class PostgresConnectionAdapter:
