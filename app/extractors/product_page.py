@@ -42,14 +42,19 @@ class _ProductPageHTMLParser(HTMLParser):
         if tag_lower == "meta":
             key = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
             content = attrs_dict.get("content", "").strip()
-            
+
             # product: ile başlayan tüm e-ticaret meta etiketlerini yakala
-            if (key.startswith("product:") or key in {
-                "description",
-                "og:title",
-                "og:description",
-                "og:image",
-            }) and content:
+            if (
+                key.startswith("product:")
+                or key
+                in {
+                    "description",
+                    "og:title",
+                    "og:description",
+                    "og:image",
+                    "twitter:image",
+                }
+            ) and content:
                 self.meta[key] = content
             return
 
@@ -140,6 +145,68 @@ def extract_json_ld_products(json_ld_blocks: list[str]) -> list[dict]:
     return products
 
 
+_NON_PRODUCT_URL_TOKENS = {
+    "cart",
+    "basket",
+    "checkout",
+    "login",
+    "register",
+    "account",
+    "search",
+    "category",
+    "kategori",
+    "blog",
+    "contact",
+    "about",
+    "brand",
+    "marka",
+    "campaign",
+    "kampanya",
+    "page",
+    "sayfa",
+}
+
+_PRODUCT_URL_MARKERS = ("/urun", "/product", "/products", "/p/", "-p-", "-u-")
+
+
+def _meaningful_slug_tokens(path: str) -> list[str]:
+    slug = path.rstrip("/").rsplit("/", 1)[-1].lower()
+    return [token for token in slug.split("-") if len(token) >= 2 and not token.isdigit()]
+
+
+def is_product_like_url(source_url: str) -> bool:
+    parsed = urlparse(source_url)
+    path = parsed.path.lower()
+    if not path or path == "/":
+        return False
+
+    path_tokens = {token for token in path.replace("-", "/").split("/") if token}
+    if path_tokens.intersection(_NON_PRODUCT_URL_TOKENS):
+        return False
+
+    if any(marker in path for marker in _PRODUCT_URL_MARKERS):
+        return True
+
+    return len(_meaningful_slug_tokens(path)) >= 2
+
+
+def _clean_product_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = " ".join(unescape(value).split())
+    if not cleaned:
+        return None
+
+    for separator in (" | ", " – ", " - "):
+        if separator in cleaned:
+            parts = [part.strip() for part in cleaned.split(separator) if part.strip()]
+            if parts:
+                cleaned = parts[0]
+                break
+
+    return cleaned or None
+
+
 def _source_name_from_url(source_url: str) -> str:
     hostname = urlparse(source_url).hostname
     return hostname if hostname else "Product page"
@@ -227,6 +294,7 @@ def extract_product_from_html(
 
     if name is None:
         name = meta.get("og:title") or title
+    name = _clean_product_name(name)
     if description is None:
         description = meta.get("og:description") or meta.get("description")
     if brand is None:
@@ -234,31 +302,41 @@ def extract_product_from_html(
     if category is None:
         category = meta.get("product:category")
     if image_url is None:
-        image_url = meta.get("og:image")
+        image_url = meta.get("og:image") or meta.get("twitter:image")
 
-    # --- KATI DOĞRULAMA (STRICT VALIDATION) EKLENDİ ---
-    # Gerçek bir ürün sayfası olup olmadığını kontrol et
-    is_explicit_product = False
-    
-    # 1. JSON-LD içinde @type: Product var mı?
-    if json_ld_product is not None:
-        is_explicit_product = True
-    # 2. Meta etiketlerinde product: verileri var mı? (Örn: product:price:amount)
-    elif any(k.startswith("product:") for k in meta.keys()):
-        is_explicit_product = True
+    is_explicit_product = json_ld_product is not None or any(
+        k.startswith("product:") for k in meta.keys()
+    )
+    is_fallback_product = (
+        not is_explicit_product
+        and is_product_like_url(source_url)
+        and bool(name)
+        and bool(image_url)
+    )
 
-    # Eğer e-ticaret datası yoksa veya ürünün ismi/resmi yoksa atla (None dön)
-    if not is_explicit_product or not name or not image_url:
+    if (not is_explicit_product and not is_fallback_product) or not name or not image_url:
         return None
 
+    name_confidence = 0.85 if json_ld_product else 0.65 if is_explicit_product else 0.6
+    description_confidence = (
+        0.75
+        if json_ld_product and json_ld_product.get("description")
+        else 0.6
+        if is_explicit_product
+        else 0.5
+    )
+    image_confidence = (
+        0.75 if json_ld_product and _extract_image(json_ld_product.get("image")) else 0.6
+    )
+
     if name:
-        add_evidence("product_name", name, name, 0.85 if json_ld_product else 0.65)
+        add_evidence("product_name", name, name, name_confidence)
     if description:
         add_evidence(
             "description",
             description,
             description,
-            0.75 if json_ld_product and json_ld_product.get("description") else 0.6,
+            description_confidence,
         )
     if brand:
         add_evidence(
@@ -279,7 +357,7 @@ def extract_product_from_html(
             "image",
             image_url,
             image_url,
-            0.75 if json_ld_product and _extract_image(json_ld_product.get("image")) else 0.6,
+            image_confidence,
         )
 
     barcode: str | None = None
@@ -314,7 +392,7 @@ def extract_product_from_html(
                 url=image_url,
                 image_type="main",
                 source_url=source_url,
-                confidence=0.75,
+                confidence=image_confidence,
             )
         ]
         if image_url
