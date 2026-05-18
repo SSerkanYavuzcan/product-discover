@@ -102,6 +102,9 @@ class PostgresConnectionAdapter:
     def commit(self) -> None:
         self._connection.commit()
 
+    def rollback(self) -> None:
+        self._connection.rollback()
+
     def close(self) -> None:
         self._connection.close()
 
