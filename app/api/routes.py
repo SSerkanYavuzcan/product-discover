@@ -2,7 +2,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Annotated
-from app.sources.repository import delete_all_system_data
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies import get_db_connection, get_discovery_job_processor
@@ -47,7 +47,10 @@ from app.sources import (
     list_discovered_urls_by_source,
     update_source_active_status,
 )
-from app.sources.repository import delete_source_completely
+from app.sources.repository import (
+    delete_all_system_data,
+    delete_source_completely,
+)
 
 router = APIRouter()
 
@@ -393,6 +396,18 @@ def delete_registry_source_completely(
     return {"status": "deleted", "source_id": source_id}
 
 
+@router.delete(
+    "/system/reset",
+    status_code=status.HTTP_200_OK,
+)
+def reset_entire_system(
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> dict[str, str]:
+    """Wipes all product discover data from the database."""
+    delete_all_system_data(connection)
+    return {"status": "system_reset_successful"}
+
+
 @router.get(
     "/products",
     response_model=ProductListResponse,
@@ -439,16 +454,6 @@ def read_product_by_barcode(
 
     return ProductReadResponse.model_validate(product.model_dump())
 
-@router.delete(
-    "/system/reset",
-    status_code=status.HTTP_200_OK,
-)
-def reset_entire_system(
-    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
-) -> dict[str, str]:
-    """Wipes all product discover data from the database."""
-    delete_all_system_data(connection)
-    return {"status": "system_reset_successful"}
 
 @router.get(
     "/products/{product_id}",
