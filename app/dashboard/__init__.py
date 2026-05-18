@@ -1,3 +1,4 @@
+from app.dashboard.activity import DashboardActivityItem, get_dashboard_activity
 from app.dashboard.summary import (
     DashboardJobsSummary,
     DashboardLatestRunSummary,
@@ -16,4 +17,6 @@ __all__ = [
     "DashboardLatestRunSummary",
     "DashboardSummary",
     "get_dashboard_summary",
+    "DashboardActivityItem",
+    "get_dashboard_activity",
 ]

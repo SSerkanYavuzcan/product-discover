@@ -118,6 +118,28 @@ Important notes:
 - `DATABASE_PATH=/tmp/product_discover_agent.db` (sqlite mode only)
 - `DATABASE_URL` (postgres mode only, from Secret Manager)
 
+
+## Frontend CORS configuration
+
+To allow the browser-based frontend to call this API, set the GitHub repository variable `ALLOWED_ORIGINS` and redeploy.
+
+- Multiple origins are supported using commas.
+- Use origins only (scheme + host [+ optional port]); do not include paths.
+
+Examples:
+
+- Production frontend:
+  - `ALLOWED_ORIGINS=https://teknoify.com,https://www.teknoify.com`
+- Local frontend development:
+  - `ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000`
+
+Origin format:
+
+- ✅ Correct: `https://teknoify.com`
+- ❌ Incorrect: `https://teknoify.com/dashboard/agents/product-discover`
+
+After updating `ALLOWED_ORIGINS`, rerun the **Deploy to Cloud Run** workflow manually.
+
 ## After deployment: quick test checklist
 
 1. Open the deployed Cloud Run service URL.
