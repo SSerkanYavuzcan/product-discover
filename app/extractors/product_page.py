@@ -42,14 +42,14 @@ class _ProductPageHTMLParser(HTMLParser):
         if tag_lower == "meta":
             key = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
             content = attrs_dict.get("content", "").strip()
-            if key in {
+            
+            # product: ile başlayan tüm e-ticaret meta etiketlerini yakala
+            if (key.startswith("product:") or key in {
                 "description",
                 "og:title",
                 "og:description",
                 "og:image",
-                "product:brand",
-                "product:category",
-            } and content:
+            }) and content:
                 self.meta[key] = content
             return
 
@@ -236,7 +236,19 @@ def extract_product_from_html(
     if image_url is None:
         image_url = meta.get("og:image")
 
-    if not any([name, description, image_url]):
+    # --- KATI DOĞRULAMA (STRICT VALIDATION) EKLENDİ ---
+    # Gerçek bir ürün sayfası olup olmadığını kontrol et
+    is_explicit_product = False
+    
+    # 1. JSON-LD içinde @type: Product var mı?
+    if json_ld_product is not None:
+        is_explicit_product = True
+    # 2. Meta etiketlerinde product: verileri var mı? (Örn: product:price:amount)
+    elif any(k.startswith("product:") for k in meta.keys()):
+        is_explicit_product = True
+
+    # Eğer e-ticaret datası yoksa veya ürünün ismi/resmi yoksa atla (None dön)
+    if not is_explicit_product or not name or not image_url:
         return None
 
     if name:
