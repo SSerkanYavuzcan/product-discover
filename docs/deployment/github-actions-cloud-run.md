@@ -23,12 +23,13 @@ Configure these repository variables in GitHub:
 - `CLOUD_RUN_SERVICE`
 - `ARTIFACT_REGISTRY_REPOSITORY`
 
-## Required GitHub repository secrets
+## Additional GitHub repository variables (optional)
 
-Configure these repository secrets in GitHub:
+These variables are optional and only required for PostgreSQL mode:
 
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`
-- `GCP_SERVICE_ACCOUNT`
+- `DATABASE_BACKEND` (`sqlite` or `postgres`; defaults to `sqlite` when missing/blank)
+- `CLOUD_SQL_CONNECTION_NAME` (required when `DATABASE_BACKEND=postgres`)
+- `DATABASE_SECRET_NAME` (required when `DATABASE_BACKEND=postgres`)
 
 ## Required Google Cloud setup (outside this repository)
 
@@ -41,7 +42,61 @@ Before running the workflow, make sure Google Cloud is prepared:
   - pushing images to Artifact Registry,
   - deploying/updating Cloud Run services.
 
-## Demo database warning
+## Database modes
+
+### SQLite demo mode (default)
+
+If `DATABASE_BACKEND` is missing, blank, or set to `sqlite`, the workflow deploys Cloud Run with:
+
+- `DATABASE_BACKEND=sqlite`
+- `DATABASE_PATH=/tmp/product_discover_agent.db`
+
+Important notes:
+
+- `/tmp` storage is ephemeral in Cloud Run.
+- SQLite data is not persistent across deploys or restarts.
+- This mode is suitable only for quick demos and lightweight testing.
+
+### PostgreSQL Cloud SQL mode
+
+If `DATABASE_BACKEND=postgres`, the workflow expects:
+
+- `CLOUD_SQL_CONNECTION_NAME` repository variable (format: `project-id:region:instance-name`)
+- `DATABASE_SECRET_NAME` repository variable (Secret Manager secret name that stores `DATABASE_URL`)
+
+It then deploys with:
+
+- `DATABASE_BACKEND=postgres`
+- Cloud SQL instance attachment via `--add-cloudsql-instances`
+- `DATABASE_URL` injection via `--set-secrets` from Google Secret Manager
+
+The Cloud Run runtime service account must have:
+
+- **Cloud SQL Client** role
+- **Secret Manager Secret Accessor** role for the `DATABASE_URL` secret
+
+Example `DATABASE_URL` (Cloud SQL Unix socket):
+
+`postgresql://DB_USER:DB_PASSWORD@/DB_NAME?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME`
+
+> ⚠️ Do not store `DATABASE_URL` as a plain GitHub variable. Use Google Secret Manager and `--set-secrets`.
+
+## Quick PostgreSQL readiness checklist
+
+1. Create a Cloud SQL PostgreSQL instance.
+2. Create the target database.
+3. Create a database user and password.
+4. Store `DATABASE_URL` in Google Secret Manager.
+5. Grant the Cloud Run runtime service account **Cloud SQL Client**.
+6. Grant the Cloud Run runtime service account **Secret Manager Secret Accessor** for your database URL secret.
+7. Set GitHub repository variables:
+   - `DATABASE_BACKEND=postgres`
+   - `CLOUD_SQL_CONNECTION_NAME=...`
+   - `DATABASE_SECRET_NAME=...`
+8. Run the **Deploy to Cloud Run** workflow manually.
+9. Validate `GET /health` and `GET /dashboard/summary`.
+
+## SQLite demo mode warning
 
 This workflow deploys Cloud Run with temporary demo database settings:
 
@@ -59,8 +114,9 @@ Important notes:
 - `APP_NAME=product-discover-agent`
 - `ENVIRONMENT=production`
 - `LOG_LEVEL=INFO`
-- `DATABASE_BACKEND=sqlite`
-- `DATABASE_PATH=/tmp/product_discover_agent.db`
+- `DATABASE_BACKEND=sqlite` (default mode) or `DATABASE_BACKEND=postgres`
+- `DATABASE_PATH=/tmp/product_discover_agent.db` (sqlite mode only)
+- `DATABASE_URL` (postgres mode only, from Secret Manager)
 
 ## After deployment: quick test checklist
 
