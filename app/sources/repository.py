@@ -339,7 +339,6 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
         for row in product_rows:
             pid = row["product_id"]
             connection.execute("DELETE FROM product_evidence WHERE product_id = ?", (pid,))
-            connection.execute("DELETE FROM product_images WHERE product_id = ?", (pid,))
             connection.execute("DELETE FROM products WHERE product_id = ?", (pid,))
 
         connection.execute(
@@ -369,29 +368,19 @@ def delete_source_completely(connection: sqlite3.Connection, source_id: str) -> 
 def delete_all_system_data(connection: sqlite3.Connection) -> None:
     """
     Wipes ALL data across all Product Discover tables (Hard Reset)
-    in the correct Foreign Key dependency order.
+    in the correct Foreign Key dependency order using exact table names.
     """
     try:
-        # 1. Önce en uçtaki ilişkisiz tabloları veya alt dalları sil
         try:
             connection.execute("DELETE FROM dashboard_activity")
         except sqlite3.OperationalError:
             pass
             
         connection.execute("DELETE FROM url_extraction_jobs")
-        
-        # 2. Ürünlere ve Kaynaklara bağlı olan URLs tablosunu sil
         connection.execute("DELETE FROM discovered_urls")
         connection.execute("DELETE FROM extraction_runs")
-        
-        # 3. Ürünlerin alt detaylarını sil
         connection.execute("DELETE FROM product_evidence")
-        connection.execute("DELETE FROM product_images")
-        
-        # 4. Artık özgür kalan Ürünleri sil
         connection.execute("DELETE FROM products")
-        
-        # 5. En son Ana Kaynakları sil
         connection.execute("DELETE FROM source_registry")
         
         connection.commit()
