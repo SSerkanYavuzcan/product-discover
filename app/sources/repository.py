@@ -282,6 +282,55 @@ def update_discovered_url_by_source_and_url(
     )
 
 
+def get_source_processing_summary_counts(
+    connection: sqlite3.Connection,
+    source_id: str,
+) -> dict[str, int]:
+    row = connection.execute(
+        """
+        SELECT
+            COUNT(*) AS total_urls,
+            SUM(CASE WHEN status = 'discovered' THEN 1 ELSE 0 END) AS discovered_urls,
+            SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued_urls,
+            SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_urls,
+            SUM(CASE WHEN status IN ('completed', 'processed') THEN 1 ELSE 0 END) AS completed_urls,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_urls,
+            SUM(CASE WHEN status = 'not_found' THEN 1 ELSE 0 END) AS not_found_urls,
+            SUM(CASE WHEN status = 'discovered' THEN 1 ELSE 0 END) AS remaining_urls,
+            COUNT(DISTINCT CASE WHEN product_id IS NOT NULL THEN product_id END) AS total_products
+        FROM discovered_urls
+        WHERE source_id = ?
+        """,
+        (source_id,),
+    ).fetchone()
+    if row is None:
+        return {
+            "source_id": source_id,
+            "total_urls": 0,
+            "discovered_urls": 0,
+            "queued_urls": 0,
+            "running_urls": 0,
+            "completed_urls": 0,
+            "failed_urls": 0,
+            "not_found_urls": 0,
+            "remaining_urls": 0,
+            "total_products": 0,
+        }
+
+    return {
+        "source_id": source_id,
+        "discovered_urls": int(row["discovered_urls"] or 0),
+        "queued_urls": int(row["queued_urls"] or 0),
+        "running_urls": int(row["running_urls"] or 0),
+        "completed_urls": int(row["completed_urls"] or 0),
+        "failed_urls": int(row["failed_urls"] or 0),
+        "not_found_urls": int(row["not_found_urls"] or 0),
+        "total_urls": int(row["total_urls"] or 0),
+        "total_products": int(row["total_products"] or 0),
+        "remaining_urls": int(row["remaining_urls"] or 0),
+    }
+
+
 def _deserialize_extraction_run(row: sqlite3.Row) -> ExtractionRun:
     return ExtractionRun(
         run_id=row["run_id"],

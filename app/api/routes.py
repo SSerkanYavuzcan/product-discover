@@ -20,10 +20,13 @@ from app.api.schemas import (
     ProcessedJobItemResponse,
     ProcessManyJobsRequest,
     ProcessManyJobsResponse,
+    ProcessNextBatchRequest,
+    ProcessNextBatchResponse,
     ProductListResponse,
     ProductReadResponse,
     SitemapDiscoveryRequest,
     SourceActiveStatusRequest,
+    SourceProcessingSummaryResponse,
     SourceRegistryCreateRequest,
     SourceRegistryResponse,
     UrlIngestionRequest,
@@ -50,6 +53,7 @@ from app.sources import (
 from app.sources.repository import (
     delete_all_system_data,
     delete_source_completely,
+    get_source_processing_summary_counts,
 )
 
 router = APIRouter()
@@ -335,6 +339,124 @@ def create_jobs_from_discovered_urls(
         created_count=result.created_count,
         skipped_count=result.skipped_count,
         job_ids=result.job_ids,
+    )
+
+
+@router.get(
+    "/sources/{source_id}/processing-summary",
+    response_model=SourceProcessingSummaryResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_source_processing_summary(
+    source_id: str,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> SourceProcessingSummaryResponse:
+    source = get_source(connection, source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    summary = get_source_processing_summary_counts(connection, source_id)
+    return SourceProcessingSummaryResponse(**summary)
+
+
+@router.post(
+    "/sources/{source_id}/process-next-batch",
+    response_model=ProcessNextBatchResponse,
+    status_code=status.HTTP_200_OK,
+)
+def process_next_source_batch(
+    source_id: str,
+    payload: ProcessNextBatchRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+    processor: Annotated[
+        Callable[[sqlite3.Connection, str], DiscoveryJob | None],
+        Depends(get_discovery_job_processor),
+    ] = None,
+) -> ProcessNextBatchResponse:
+    source = get_source(connection, source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    creation_result = create_url_extraction_jobs_from_discovered_urls(
+        connection=connection,
+        source_id=source_id,
+        status=payload.status,
+        limit=payload.batch_size,
+        priority=payload.priority,
+        batch_id=payload.batch_id,
+    )
+    if creation_result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    results: list[ProcessedJobItemResponse] = []
+    completed_count = 0
+    failed_count = 0
+    not_found_count = 0
+
+    for selected_job_id in creation_result.job_ids:
+        try:
+            job = processor(connection, selected_job_id)
+        except ValueError as exc:
+            failed_count += 1
+            results.append(
+                ProcessedJobItemResponse(
+                    job_id=selected_job_id,
+                    status="failed",
+                    error_message=str(exc),
+                )
+            )
+            continue
+
+        if job is None:
+            not_found_count += 1
+            results.append(
+                ProcessedJobItemResponse(
+                    job_id=selected_job_id,
+                    status="not_found",
+                    error_message=f"Discovery job not found: {selected_job_id}",
+                )
+            )
+            continue
+
+        job_status = job.status.value
+        if job_status == "completed":
+            completed_count += 1
+        if job_status in {"failed", "not_found"}:
+            failed_count += 1
+        if job_status == "not_found":
+            not_found_count += 1
+
+        results.append(
+            ProcessedJobItemResponse(
+                job_id=job.job_id,
+                status=job.status,
+                job_type=job.job_type,
+                result_product_id=job.result_product_id,
+                error_message=job.error_message,
+            )
+        )
+
+    summary = get_source_processing_summary_counts(connection, source_id)
+    return ProcessNextBatchResponse(
+        source_id=source_id,
+        requested_batch_size=payload.batch_size,
+        created_count=creation_result.created_count,
+        processed_count=len(creation_result.job_ids),
+        completed_count=completed_count,
+        failed_count=failed_count,
+        not_found_count=not_found_count,
+        skipped_count=creation_result.skipped_count,
+        remaining_urls=summary["remaining_urls"],
+        results=results,
     )
 
 

@@ -186,6 +186,39 @@ class DiscoveredUrlJobCreationResponse(BaseModel):
     job_ids: list[str] = Field(default_factory=list)
 
 
+class SourceProcessingSummaryResponse(BaseModel):
+    source_id: str
+    discovered_urls: int
+    queued_urls: int
+    running_urls: int
+    completed_urls: int
+    failed_urls: int
+    not_found_urls: int
+    total_urls: int
+    total_products: int
+    remaining_urls: int
+
+
+class ProcessNextBatchRequest(BaseModel):
+    batch_size: int = Field(default=20, ge=1, le=20)
+    priority: JobPriority = JobPriority.normal
+    status: str = "discovered"
+    batch_id: str | None = None
+
+
+class ProcessNextBatchResponse(BaseModel):
+    source_id: str
+    requested_batch_size: int
+    created_count: int
+    processed_count: int
+    completed_count: int
+    failed_count: int
+    not_found_count: int
+    skipped_count: int
+    remaining_urls: int
+    results: list["ProcessedJobItemResponse"] = Field(default_factory=list)
+
+
 class ProcessManyJobsRequest(BaseModel):
     job_ids: list[str] = Field(min_length=1)
     max_jobs: int = Field(default=10, ge=1, le=20)
