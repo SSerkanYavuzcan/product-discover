@@ -116,7 +116,11 @@ def test_collect_sitemap_page_urls_respects_max_sitemaps() -> None:
         "https://example.com/sitemap-2.xml": "<urlset><url><loc>https://example.com/product/2</loc></url></urlset>",
         "https://example.com/sitemap-3.xml": "<urlset><url><loc>https://example.com/product/3</loc></url></urlset>",
     }
-    pages, stats = collect_sitemap_page_urls("https://example.com/sitemap.xml", fetcher=lambda url: mapping[url], max_sitemaps=2)
+    pages, stats = collect_sitemap_page_urls(
+        "https://example.com/sitemap.xml",
+        fetcher=lambda url: mapping[url],
+        max_sitemaps=2,
+    )
 
     assert len(pages) == 1
     assert stats["sitemaps_processed"] == 2
@@ -264,7 +268,9 @@ def test_discover_urls_from_source_sitemap_marks_failed(tmp_path: Path) -> None:
         assert run.completed_at is not None
 
 
-def test_discover_urls_from_source_sitemap_supports_more_than_five_child_sitemaps(tmp_path: Path) -> None:
+def test_discover_urls_from_source_sitemap_supports_more_than_five_child_sitemaps(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "more_children.db"
     initialize_database(str(db_path))
 
@@ -275,7 +281,8 @@ def test_discover_urls_from_source_sitemap_supports_more_than_five_child_sitemap
         )
 
         children = "".join(
-            f"<sitemap><loc>https://example.com/sitemap-{idx}.xml</loc></sitemap>" for idx in range(1, 8)
+            f"<sitemap><loc>https://example.com/sitemap-{idx}.xml</loc></sitemap>"
+            for idx in range(1, 8)
         )
 
         def fake_fetcher(url: str) -> str:

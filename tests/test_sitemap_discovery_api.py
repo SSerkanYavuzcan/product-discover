@@ -217,11 +217,27 @@ def test_discover_sitemap_endpoint_accepts_legacy_and_new_limits(tmp_path, monke
 
     captured: dict[str, object] = {}
 
-    def fake_discover_urls_from_source_sitemap(connection, source_id, fetcher=None, max_child_sitemaps=5, product_only=True):
+    def fake_discover_urls_from_source_sitemap(
+        connection,
+        source_id,
+        fetcher=None,
+        max_child_sitemaps=5,
+        product_only=True,
+    ):
         captured["max_child_sitemaps"] = max_child_sitemaps
-        return ExtractionRun(run_id="run-limits", source_id=source_id, status="completed", started_at=datetime.now(UTC), pages_seen=0, products_found=0)
+        return ExtractionRun(
+            run_id="run-limits",
+            source_id=source_id,
+            status="completed",
+            started_at=datetime.now(UTC),
+            pages_seen=0,
+            products_found=0,
+        )
 
-    monkeypatch.setattr("app.api.routes.discover_urls_from_source_sitemap", fake_discover_urls_from_source_sitemap)
+    monkeypatch.setattr(
+        "app.api.routes.discover_urls_from_source_sitemap",
+        fake_discover_urls_from_source_sitemap,
+    )
 
     def override_get_db_connection() -> Iterator[sqlite3.Connection]:
         connection = get_connection(str(db_path))
@@ -233,7 +249,10 @@ def test_discover_sitemap_endpoint_accepts_legacy_and_new_limits(tmp_path, monke
     app.dependency_overrides[get_db_connection] = override_get_db_connection
     try:
         client = TestClient(app)
-        response = client.post(f"/sources/{source.source_id}/discover-sitemap", json={"max_child_sitemaps": 120})
+        response = client.post(
+            f"/sources/{source.source_id}/discover-sitemap",
+            json={"max_child_sitemaps": 120},
+        )
         assert response.status_code == 200
         assert captured["max_child_sitemaps"] == 120
     finally:
