@@ -9,6 +9,7 @@ from app.discovery.sitemap import (
     SITEMAP_USER_AGENT,
     SitemapDiscoveryError,
     build_sitemap_url,
+    collect_sitemap_page_urls,
     discover_urls_from_source_sitemap,
     fetch_sitemap_xml,
     filter_product_urls,
@@ -57,22 +58,69 @@ def test_parse_sitemap_urls_raises_on_invalid_xml() -> None:
         parse_sitemap_urls("<urlset><url><loc>missing close")
 
 
-def test_filter_product_urls_and_heuristics() -> None:
-    urls = [
-        "https://shop.example.com/product/widget-1",
-        "https://shop.example.com/category/widgets",
-        "https://shop.example.com/item/test-product-slug-long",
-        "https://shop.example.com/assets/logo.png",
-        "https://shop.example.com/login",
-    ]
-    assert is_probable_product_url("https://shop.example.com/product/widget-1") is True
-    assert is_probable_product_url("https://shop.example.com/assets/logo.png") is False
-    assert is_probable_product_url("https://shop.example.com/search?q=phone") is False
+def test_product_url_heuristics_and_filtering() -> None:
+    product_url = "https://www.kimgeldi.com/jacobs-18-gr-3-u-1-arada-yumusak-icim"
+    assert is_probable_product_url(product_url) is True
 
-    assert filter_product_urls(urls) == [
-        "https://shop.example.com/product/widget-1",
-        "https://shop.example.com/item/test-product-slug-long",
+    assert is_probable_product_url("https://shop.example.com/kategori/kahve") is False
+    assert is_probable_product_url("https://shop.example.com/search?q=coffee") is False
+    assert is_probable_product_url("https://shop.example.com/cart") is False
+    assert is_probable_product_url("https://shop.example.com/blog/some-post") is False
+
+    urls = [
+        "https://shop.example.com/kategori/kahve",
+        "https://shop.example.com/jacobs-18-gr-3-u-1-arada-yumusak-icim",
+        "https://shop.example.com/product/nescafe-3-u-1-arada-10-lu-extra",
+        "https://shop.example.com/assets/logo.png",
     ]
+    assert filter_product_urls(urls) == [
+        "https://shop.example.com/jacobs-18-gr-3-u-1-arada-yumusak-icim",
+        "https://shop.example.com/product/nescafe-3-u-1-arada-10-lu-extra",
+    ]
+
+
+def test_collect_sitemap_page_urls_recurses_indexes() -> None:
+    pages, stats = collect_sitemap_page_urls(
+        root_sitemap_url="https://example.com/sitemap.xml",
+        fetcher=lambda url: {
+            "https://example.com/sitemap.xml": """
+                <sitemapindex>
+                    <sitemap><loc>https://example.com/sitemap-a.xml</loc></sitemap>
+                    <sitemap><loc>https://example.com/sitemap-b.xml</loc></sitemap>
+                </sitemapindex>
+            """,
+            "https://example.com/sitemap-a.xml": """
+                <urlset><url><loc>https://example.com/product/a</loc></url></urlset>
+            """,
+            "https://example.com/sitemap-b.xml": """
+                <urlset><url><loc>https://example.com/product/b</loc></url></urlset>
+            """,
+        }[url],
+    )
+
+    assert set(pages) == {"https://example.com/product/a", "https://example.com/product/b"}
+    assert stats["sitemaps_processed"] == 3
+    assert stats["max_sitemaps_reached"] is False
+
+
+def test_collect_sitemap_page_urls_respects_max_sitemaps() -> None:
+    mapping = {
+        "https://example.com/sitemap.xml": """
+            <sitemapindex>
+                <sitemap><loc>https://example.com/sitemap-1.xml</loc></sitemap>
+                <sitemap><loc>https://example.com/sitemap-2.xml</loc></sitemap>
+                <sitemap><loc>https://example.com/sitemap-3.xml</loc></sitemap>
+            </sitemapindex>
+        """,
+        "https://example.com/sitemap-1.xml": "<urlset><url><loc>https://example.com/product/1</loc></url></urlset>",
+        "https://example.com/sitemap-2.xml": "<urlset><url><loc>https://example.com/product/2</loc></url></urlset>",
+        "https://example.com/sitemap-3.xml": "<urlset><url><loc>https://example.com/product/3</loc></url></urlset>",
+    }
+    pages, stats = collect_sitemap_page_urls("https://example.com/sitemap.xml", fetcher=lambda url: mapping[url], max_sitemaps=2)
+
+    assert len(pages) == 1
+    assert stats["sitemaps_processed"] == 2
+    assert stats["max_sitemaps_reached"] is True
 
 
 def test_fetch_sitemap_xml_uses_headers_and_decodes() -> None:
@@ -214,3 +262,34 @@ def test_discover_urls_from_source_sitemap_marks_failed(tmp_path: Path) -> None:
         assert run.status == "failed"
         assert run.error_message == "boom"
         assert run.completed_at is not None
+
+
+def test_discover_urls_from_source_sitemap_supports_more_than_five_child_sitemaps(tmp_path: Path) -> None:
+    db_path = tmp_path / "more_children.db"
+    initialize_database(str(db_path))
+
+    with get_connection(str(db_path)) as connection:
+        source = create_source(
+            connection,
+            SourceRegistry(source_name="Many", source_type="retailer", base_url="https://example.com"),
+        )
+
+        children = "".join(
+            f"<sitemap><loc>https://example.com/sitemap-{idx}.xml</loc></sitemap>" for idx in range(1, 8)
+        )
+
+        def fake_fetcher(url: str) -> str:
+            if url == "https://example.com/sitemap.xml":
+                return f"<sitemapindex>{children}</sitemapindex>"
+            if "sitemap-" in url:
+                idx = url.split("-")[-1].split(".")[0]
+                return f"<urlset><url><loc>https://example.com/product/item-{idx}</loc></url></urlset>"
+            raise SitemapDiscoveryError("unexpected")
+
+        run = discover_urls_from_source_sitemap(
+            connection, source.source_id, fetcher=fake_fetcher, max_child_sitemaps=10
+        )
+
+        assert run is not None
+        assert run.pages_seen == 7
+        assert run.products_found == 7
