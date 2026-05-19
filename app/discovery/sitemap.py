@@ -2,7 +2,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
@@ -69,47 +69,64 @@ def parse_sitemap_urls(xml_content: str) -> list[str]:
     return urls
 
 
-def is_probable_product_url(url: str) -> bool:
-    path = urlparse(url).path.lower()
+def product_url_score(url: str) -> tuple[int, list[str]]:
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    query = parsed.query.lower()
+    reasons: list[str] = []
 
     static_extensions = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".css", ".js", ".pdf")
     if path.endswith(static_extensions):
-        return False
+        return -100, ["static_extension"]
 
-    # Genişletilmiş engellenen kelime/desen listesi
     blocked_patterns = (
         "/cart", "/basket", "/checkout", "/login", "/register", "/account",
-        "/contact", "/about", "/blog", "/search", 
-        "/category", "/categories", "/kategori", "/kategoriler",
-        "/marka", "/markalar", "/brand", "/brands",
-        "/c/", "/m/", "/list/", "/kampanyalar", "/iletisim", "/hakkimizda",
-        "/sayfa", "/pages", "/policies"
+        "/search", "/category", "/categories", "/kategori", "/kategoriler",
+        "/blog", "/contact", "/about", "/brand", "/marka",
+        "/campaign", "/kampanya", "/page", "/sayfa", "/policies",
     )
     if any(pattern in path for pattern in blocked_patterns):
-        return False
+        return -100, ["blocked_path"]
 
+    if "search" in parse_qs(query):
+        return -100, ["search_query"]
+
+    score = 0
     product_patterns = (
         "/product", "/products", "/urun", "/urunler",
-        "/p/", "-p-", "-p.", "product-detail", "productdetails",
-        ".html", "-u-"
+        "/p/", "-p-", "-u-", ".html", "product-detail",
     )
     if any(pattern in path for pattern in product_patterns):
-        return True
+        score += 3
+        reasons.append("explicit_product_pattern")
 
-    # URL'de product kelimesi yoksa alt dizine bak.
     segments = [segment for segment in path.split("/") if segment]
-    
-    # Tek seviyeli URL'ler genelde kategoridir, eleyelim.
-    if len(segments) < 2:
-        return False
-        
-    # Segment sayısı >= 2 ise, son kısmın uzunluğuna bakalım.
-    # Ürün slug'ları genelde uzundur (örn: galaxy-s24-ultra)
-    last_segment = segments[-1]
-    if len(last_segment) > 15 and "-" in last_segment:
-        return True
+    last_segment = segments[-1] if segments else ""
+    slug_tokens = [token for token in last_segment.split("-") if token]
 
-    return False
+    if len(last_segment) >= 20:
+        score += 2
+        reasons.append("long_slug")
+
+    if len(slug_tokens) >= 3:
+        score += 1
+        reasons.append("hyphenated_slug")
+
+    if any(any(ch.isdigit() for ch in token) for token in slug_tokens):
+        score += 1
+        reasons.append("numeric_token")
+
+    quantity_tokens = {"gr", "kg", "ml", "lt", "l", "adet", "li", "lu", "paket", "pk", "x"}
+    if any(token in quantity_tokens for token in slug_tokens):
+        score += 1
+        reasons.append("quantity_token")
+
+    return score, reasons
+
+
+def is_probable_product_url(url: str) -> bool:
+    score, _ = product_url_score(url)
+    return score >= 3
 
 
 def filter_product_urls(urls: list[str]) -> list[str]:
@@ -130,6 +147,63 @@ def _looks_like_sitemap_url(url: str) -> bool:
     return path.endswith(".xml") or "sitemap" in path
 
 
+
+
+def collect_sitemap_page_urls(
+    root_sitemap_url: str,
+    fetcher: Callable[[str], str],
+    max_sitemaps: int = 100,
+    max_urls: int = 50000,
+) -> tuple[list[str], dict[str, int | bool]]:
+    pending = [root_sitemap_url]
+    seen_sitemaps: set[str] = set()
+    seen_pages: set[str] = set()
+
+    sitemaps_processed = 0
+    pages_seen = 0
+    max_sitemaps_reached = False
+    max_urls_reached = False
+
+    while pending:
+        sitemap_url = pending.pop(0)
+        if sitemap_url in seen_sitemaps:
+            continue
+
+        if sitemaps_processed >= max_sitemaps:
+            max_sitemaps_reached = True
+            break
+
+        seen_sitemaps.add(sitemap_url)
+        sitemap_urls = parse_sitemap_urls(fetcher(sitemap_url))
+        sitemaps_processed += 1
+
+        for discovered_url in sitemap_urls:
+            if _looks_like_sitemap_url(discovered_url):
+                if discovered_url not in seen_sitemaps:
+                    pending.append(discovered_url)
+                continue
+
+            pages_seen += 1
+            if discovered_url in seen_pages:
+                continue
+            seen_pages.add(discovered_url)
+
+            if len(seen_pages) >= max_urls:
+                max_urls_reached = True
+                break
+
+        if max_urls_reached:
+            break
+
+    stats: dict[str, int | bool] = {
+        "sitemaps_seen": len(seen_sitemaps) + len({u for u in pending if u not in seen_sitemaps}),
+        "sitemaps_processed": sitemaps_processed,
+        "pages_seen": pages_seen,
+        "max_sitemaps_reached": max_sitemaps_reached,
+        "max_urls_reached": max_urls_reached,
+    }
+    return list(seen_pages), stats
+
 def discover_urls_from_source_sitemap(
     connection: sqlite3.Connection,
     source_id: str,
@@ -148,17 +222,13 @@ def discover_urls_from_source_sitemap(
 
     try:
         root_sitemap_url = build_sitemap_url(source.base_url)
-        root_urls = parse_sitemap_urls(fetcher(root_sitemap_url))
+        page_urls, stats = collect_sitemap_page_urls(
+            root_sitemap_url=root_sitemap_url,
+            fetcher=fetcher,
+            max_sitemaps=max_child_sitemaps,
+        )
 
-        child_sitemaps = [url for url in root_urls if _looks_like_sitemap_url(url)]
-        page_urls = [url for url in root_urls if not _looks_like_sitemap_url(url)]
-
-        if child_sitemaps:
-            for child_url in child_sitemaps[:max_child_sitemaps]:
-                child_urls = parse_sitemap_urls(fetcher(child_url))
-                page_urls.extend([url for url in child_urls if not _looks_like_sitemap_url(url)])
-
-        pages_seen = len(page_urls)
+        pages_seen = int(stats["pages_seen"])
         candidate_urls = (
             filter_product_urls(page_urls)
             if product_only
@@ -187,6 +257,13 @@ def discover_urls_from_source_sitemap(
             status="completed",
             pages_seen=pages_seen,
             products_found=persisted,
+            error_message=(
+                f"Sitemap stats: processed={stats['sitemaps_processed']}, "
+                f"seen={stats['sitemaps_seen']}, pages_seen={stats['pages_seen']}, "
+                f"product_candidates={len(candidate_urls)}, "
+                f"max_sitemaps_reached={stats['max_sitemaps_reached']}, "
+                f"max_urls_reached={stats['max_urls_reached']}"
+            ),
             mark_completed=True,
         )
         return updated

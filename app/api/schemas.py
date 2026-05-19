@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.jobs.models import JobPriority, JobStatus, JobType
 from app.models import (
@@ -131,8 +131,17 @@ class SourceActiveStatusRequest(BaseModel):
 
 
 class SitemapDiscoveryRequest(BaseModel):
-    max_child_sitemaps: int = Field(default=5, ge=0)
+    max_child_sitemaps: int = Field(default=5, ge=0, le=250)
+    max_sitemaps: int | None = Field(default=None, ge=0, le=250)
     product_only: bool = True
+
+    @model_validator(mode="after")
+    def sync_max_sitemaps(self) -> "SitemapDiscoveryRequest":
+        if self.max_sitemaps is None:
+            self.max_sitemaps = self.max_child_sitemaps
+        else:
+            self.max_child_sitemaps = self.max_sitemaps
+        return self
 
 
 class ExtractionRunResponse(BaseModel):

@@ -65,7 +65,7 @@ def test_discover_sitemap_endpoint_returns_run_and_passes_params(tmp_path, monke
 
         response = client.post(
             f"/sources/{source.source_id}/discover-sitemap",
-            json={"max_child_sitemaps": 2, "product_only": False},
+            json={"max_sitemaps": 2, "product_only": False},
         )
 
         assert response.status_code == 200
@@ -197,5 +197,63 @@ def test_discover_sitemap_endpoint_rejects_negative_max_child_sitemaps(tmp_path)
             json={"max_child_sitemaps": -1, "product_only": True},
         )
         assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_discover_sitemap_endpoint_accepts_legacy_and_new_limits(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "limits_api.db"
+    initialize_database(str(db_path))
+
+    with get_connection(str(db_path)) as connection:
+        source = create_source(
+            connection,
+            SourceRegistry(
+                source_name="Limits Market",
+                source_type="website",
+                base_url="https://limits.example.com",
+            ),
+        )
+
+    captured: dict[str, object] = {}
+
+    def fake_discover_urls_from_source_sitemap(
+        connection,
+        source_id,
+        fetcher=None,
+        max_child_sitemaps=5,
+        product_only=True,
+    ):
+        captured["max_child_sitemaps"] = max_child_sitemaps
+        return ExtractionRun(
+            run_id="run-limits",
+            source_id=source_id,
+            status="completed",
+            started_at=datetime.now(UTC),
+            pages_seen=0,
+            products_found=0,
+        )
+
+    monkeypatch.setattr(
+        "app.api.routes.discover_urls_from_source_sitemap",
+        fake_discover_urls_from_source_sitemap,
+    )
+
+    def override_get_db_connection() -> Iterator[sqlite3.Connection]:
+        connection = get_connection(str(db_path))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    app.dependency_overrides[get_db_connection] = override_get_db_connection
+    try:
+        client = TestClient(app)
+        response = client.post(
+            f"/sources/{source.source_id}/discover-sitemap",
+            json={"max_child_sitemaps": 120},
+        )
+        assert response.status_code == 200
+        assert captured["max_child_sitemaps"] == 120
     finally:
         app.dependency_overrides.clear()
