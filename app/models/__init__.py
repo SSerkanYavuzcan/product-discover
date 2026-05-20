@@ -10,8 +10,8 @@ from app.models.repository import (
     get_product,
     get_product_by_barcode,
     list_product_evidence,
-    upsert_product_profile,
     update_product,
+    upsert_product_profile,
 )
 
 __all__ = [
