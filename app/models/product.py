@@ -29,6 +29,8 @@ class ProductProfile(BaseModel):
     allergens: list[str] = Field(default_factory=list)
     evidence: list[SourceEvidence] = Field(default_factory=list)
     confidence: ConfidenceScore | None = None
+    quality_score: float | None = None
+    quality_flags: list[str] = Field(default_factory=list)
     status: str = "draft"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
