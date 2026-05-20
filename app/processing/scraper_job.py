@@ -4,21 +4,11 @@ from datetime import UTC, datetime
 from app.models import ConfidenceScore, ProductImage, ProductProfile, SourceEvidence
 from app.models.repository import (
     add_product_evidence,
-    create_product,
-    list_products,
+    normalize_source_url,
+    upsert_product_profile,
 )
 from app.scrapers.base import ScrapedProduct
 from app.sources.models import SourceRegistry
-
-
-def _existing_product_by_source_url(
-    connection: sqlite3.Connection,
-    source_url: str,
-) -> ProductProfile | None:
-    for product in list_products(connection, limit=500):
-        if any(e.source_url == source_url for e in product.evidence):
-            return product
-    return None
 
 
 def persist_scraped_products(
@@ -33,10 +23,6 @@ def persist_scraped_products(
 
     for item in scraped_products:
         try:
-            if _existing_product_by_source_url(connection, item.source_url) is not None:
-                skipped += 1
-                continue
-
             product = ProductProfile(
                 product_name=item.product_name,
                 barcode=item.barcode,
@@ -46,7 +32,7 @@ def persist_scraped_products(
                 confidence=ConfidenceScore(overall=0.6, field_scores={"product_name": 0.9}),
                 status="draft",
             )
-            saved = create_product(connection, product)
+            saved = upsert_product_profile(connection, product, source_url=item.source_url)
 
             evidence_items = [
                 SourceEvidence(
@@ -89,6 +75,19 @@ def persist_scraped_products(
                         extracted_at=now,
                     )
                 )
+            evidence_items.append(
+                SourceEvidence(
+                    source_id=source.source_id,
+                    source_name=source.source_name,
+                    source_type=source.source_type,
+                    source_url=item.source_url,
+                    field_name="source_url",
+                    raw_value=item.source_url,
+                    normalized_value=normalize_source_url(item.source_url),
+                    confidence=1.0,
+                    extracted_at=now,
+                )
+            )
 
             for evidence in evidence_items:
                 add_product_evidence(connection, saved.product_id or "", evidence)

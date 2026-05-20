@@ -1,5 +1,7 @@
+import re
 import sqlite3
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from app.models.evidence import ConfidenceScore, ProductImage, SourceEvidence
@@ -8,6 +10,85 @@ from app.models.product import ProductProfile
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _normalize_whitespace(value: str) -> str:
+    return " ".join(value.split()).strip()
+
+
+def normalize_product_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    lowered = _normalize_whitespace(value).lower()
+    cleaned = re.sub(r"[^\w\s-]", " ", lowered)
+    normalized = _normalize_whitespace(cleaned)
+    return normalized or None
+
+
+def normalize_source_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    parsed = urlparse(value.strip())
+    host = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+    if not host:
+        return None
+    scheme = parsed.scheme.lower() if parsed.scheme else "https"
+    normalized = f"{scheme}://{host}{path}"
+    return normalized.rstrip("/")
+
+
+def _source_domain(value: str | None) -> str | None:
+    normalized = normalize_source_url(value)
+    if not normalized:
+        return None
+    return urlparse(normalized).netloc.lower() or None
+
+
+def build_product_identity_key(
+    product: ProductProfile, source_url: str | None = None
+) -> str | None:
+    barcode_or_gtin = (product.barcode or product.gtin or "").strip()
+    if barcode_or_gtin:
+        return f"barcode:{barcode_or_gtin}"
+    normalized_source = normalize_source_url(source_url)
+    if normalized_source:
+        return f"source_url:{normalized_source}"
+    normalized_name = normalize_product_name(product.product_name)
+    normalized_domain = _source_domain(source_url)
+    if normalized_name and normalized_domain:
+        return f"name_domain:{normalized_domain}:{normalized_name}"
+    return None
+
+
+def evaluate_product_quality(
+    product: ProductProfile, source_url: str | None = None
+) -> tuple[float, list[str]]:
+    flags: list[str] = []
+    score = 0.0
+    if product.product_name:
+        score += 0.30
+    if source_url:
+        score += 0.15
+    else:
+        flags.append("missing_source_url")
+    if product.images:
+        score += 0.20
+    else:
+        flags.append("missing_image")
+    if product.brand:
+        score += 0.10
+    else:
+        flags.append("missing_brand")
+    if product.barcode or product.gtin:
+        score += 0.15
+    else:
+        flags.append("missing_barcode")
+    if product.confidence is not None:
+        score += 0.10
+    else:
+        flags.append("missing_price")
+    return min(1.0, round(score, 2)), flags
 
 
 def _serialize_product(product: ProductProfile) -> dict[str, object | None]:
@@ -106,6 +187,10 @@ def _hydrate_product_from_evidence(
         overall = round(sum(item.confidence for item in evidence) / len(evidence), 3)
         hydrated.confidence = ConfidenceScore(overall=overall, field_scores=field_max_confidence)
 
+    source_url = next((item.source_url for item in evidence if item.source_url), None)
+    quality_score, quality_flags = evaluate_product_quality(hydrated, source_url=source_url)
+    hydrated.quality_score = quality_score
+    hydrated.quality_flags = quality_flags
     return hydrated
 
 
@@ -226,6 +311,93 @@ def update_product(
     )
     connection.commit()
     return get_product(connection, product.product_id)
+
+
+def _choose_value(existing: str | None, new: str | None) -> str | None:
+    if new is None or not str(new).strip():
+        return existing
+    return new
+
+
+def upsert_product_profile(
+    connection: sqlite3.Connection, product_profile: ProductProfile, source_url: str | None = None
+) -> ProductProfile:
+    candidate = None
+    barcode_or_gtin = (product_profile.barcode or product_profile.gtin or "").strip()
+    if barcode_or_gtin:
+        candidate = get_product_by_barcode(connection, barcode_or_gtin)
+        if candidate is None and product_profile.gtin:
+            row = connection.execute(
+                "SELECT product_id FROM products WHERE gtin = ? ORDER BY created_at ASC LIMIT 1",
+                (product_profile.gtin,),
+            ).fetchone()
+            candidate = get_product(connection, row["product_id"]) if row else None
+    if candidate is None and source_url:
+        normalized_source = normalize_source_url(source_url)
+        if normalized_source:
+            row = connection.execute(
+                """
+                SELECT product_id FROM product_evidence
+                WHERE field_name = 'source_url' AND normalized_value = ?
+                ORDER BY extracted_at DESC LIMIT 1
+                """,
+                (normalized_source,),
+            ).fetchone()
+            candidate = get_product(connection, row["product_id"]) if row else None
+    if candidate is None and source_url and product_profile.product_name:
+        normalized_name = normalize_product_name(product_profile.product_name)
+        normalized_domain = _source_domain(source_url)
+        if normalized_name and normalized_domain:
+            rows = connection.execute("SELECT product_id, product_name FROM products").fetchall()
+            for row in rows:
+                existing = get_product(connection, row["product_id"])
+                if existing is None:
+                    continue
+                existing_name = normalize_product_name(existing.product_name)
+                existing_domain = _source_domain(
+                    next((item.source_url for item in existing.evidence if item.source_url), None)
+                )
+                if existing_name == normalized_name and existing_domain == normalized_domain:
+                    candidate = existing
+                    break
+    if candidate is None:
+        saved = create_product(connection, product_profile)
+    else:
+        merged = candidate.model_copy(
+            update={
+                "barcode": _choose_value(candidate.barcode, product_profile.barcode),
+                "gtin": _choose_value(candidate.gtin, product_profile.gtin),
+                "product_name": _choose_value(candidate.product_name, product_profile.product_name),
+                "brand": _choose_value(candidate.brand, product_profile.brand),
+                "category": _choose_value(candidate.category, product_profile.category),
+                "status": (
+                    _choose_value(candidate.status, product_profile.status)
+                    or candidate.status
+                ),
+                "confidence": product_profile.confidence or candidate.confidence,
+                "images": product_profile.images or candidate.images,
+                "created_at": candidate.created_at,
+                "updated_at": _utc_now(),
+            }
+        )
+        saved = update_product(connection, merged) or candidate
+
+    if source_url and saved.product_id:
+        add_product_evidence(
+            connection,
+            saved.product_id,
+            SourceEvidence(
+                source_name="product_discover",
+                source_type="extraction",
+                source_url=source_url,
+                field_name="source_url",
+                raw_value=source_url,
+                normalized_value=normalize_source_url(source_url),
+                confidence=1.0,
+                extracted_at=_utc_now(),
+            ),
+        )
+    return get_product(connection, saved.product_id or "") or saved
 
 
 def add_product_evidence(

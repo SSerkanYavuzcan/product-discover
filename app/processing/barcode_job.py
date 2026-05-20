@@ -11,9 +11,7 @@ from app.jobs.repository import (
 from app.models import ProductProfile
 from app.models.repository import (
     add_product_evidence,
-    create_product,
-    get_product_by_barcode,
-    update_product,
+    upsert_product_profile,
 )
 
 
@@ -38,21 +36,7 @@ def process_barcode_lookup_job(
         if product is None:
             return update_discovery_job_status(connection, job_id, JobStatus.not_found)
 
-        existing = get_product_by_barcode(connection, job.input_value)
-        if existing is None:
-            saved = create_product(connection, product)
-        else:
-            saved = update_product(
-                connection,
-                product.model_copy(update={"product_id": existing.product_id}),
-            )
-            if saved is None:
-                return update_discovery_job_status(
-                    connection,
-                    job_id,
-                    JobStatus.failed,
-                    error_message="Failed to update existing product",
-                )
+        saved = upsert_product_profile(connection, product)
 
         for evidence in product.evidence:
             add_product_evidence(connection, saved.product_id or "", evidence)

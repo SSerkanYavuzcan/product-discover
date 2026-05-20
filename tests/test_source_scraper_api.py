@@ -98,3 +98,41 @@ def test_scrape_uses_custom_scraper_and_returns_counts(tmp_path, monkeypatch) ->
         assert payload["persisted_count"] == 1
     finally:
         app.dependency_overrides.clear()
+
+
+def test_scrape_custom_scraper_deduplicates_same_product(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "scrape_custom_dupe.db"
+    initialize_database(str(db_path))
+    app.dependency_overrides[get_db_connection] = _override_db(str(db_path))
+
+    from app.scrapers.base import ScrapedProduct
+    from app.scrapers.kimgeldi import KimgeldiScraper
+
+    def fake_scrape(self, source, limit=100):  # noqa: ANN001
+        del self, source, limit
+        return [
+            ScrapedProduct(product_name="Demo", source_url="https://kimgeldi.com/urun/demo"),
+            ScrapedProduct(product_name=" Demo ", source_url="https://kimgeldi.com/urun/demo"),
+        ]
+
+    monkeypatch.setattr(KimgeldiScraper, "scrape", fake_scrape)
+    try:
+        with get_connection(str(db_path)) as connection:
+            source = create_source(
+                connection,
+                SourceRegistry(
+                    source_name="Kimgeldi",
+                    source_type="website",
+                    base_url="https://kimgeldi.com",
+                ),
+            )
+        response = TestClient(app).post(f"/sources/{source.source_id}/scrape", json={"limit": 10})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["scraped_count"] == 2
+        assert payload["persisted_count"] == 2
+        with get_connection(str(db_path)) as connection:
+            count = connection.execute("SELECT COUNT(*) AS c FROM products").fetchone()["c"]
+        assert count == 1
+    finally:
+        app.dependency_overrides.clear()

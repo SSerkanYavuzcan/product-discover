@@ -6,6 +6,7 @@ import pytest
 
 from app.models import (
     ConfidenceScore,
+    ProductImage,
     ProductProfile,
     SourceEvidence,
     add_product_evidence,
@@ -15,7 +16,9 @@ from app.models import (
     get_product_by_barcode,
     list_product_evidence,
     update_product,
+    upsert_product_profile,
 )
+from app.models.repository import evaluate_product_quality
 from app.storage import get_connection, initialize_database
 
 
@@ -231,3 +234,54 @@ def test_delete_product_deletes_product_and_evidence(db_connection: sqlite3.Conn
 
 def test_delete_product_returns_false_for_missing(db_connection: sqlite3.Connection) -> None:
     assert delete_product(db_connection, "missing") is False
+
+
+def test_upsert_by_source_url_updates_existing_record(db_connection: sqlite3.Connection) -> None:
+    first = upsert_product_profile(
+        db_connection, ProductProfile(product_name="Milk", brand="A"), "https://example.com/p/1"
+    )
+    second = upsert_product_profile(
+        db_connection, ProductProfile(product_name="Milk 2", brand="B"), "https://example.com/p/1"
+    )
+    assert first.product_id == second.product_id
+    assert second.product_name == "Milk 2"
+
+
+def test_upsert_by_barcode_updates_across_urls(db_connection: sqlite3.Connection) -> None:
+    first = upsert_product_profile(
+        db_connection, ProductProfile(product_name="Tea", barcode="123"), "https://a.com/p/tea"
+    )
+    second = upsert_product_profile(
+        db_connection, ProductProfile(product_name="Tea New", barcode="123"), "https://b.com/p/tea"
+    )
+    assert first.product_id == second.product_id
+
+
+def test_upsert_by_normalized_name_and_domain(db_connection: sqlite3.Connection) -> None:
+    first = upsert_product_profile(
+        db_connection, ProductProfile(product_name="Ultra  Cleaner!!"), "https://shop.com/p/1"
+    )
+    second = upsert_product_profile(
+        db_connection, ProductProfile(product_name=" ultra cleaner "), "https://shop.com/p/2"
+    )
+    assert first.product_id == second.product_id
+
+
+def test_upsert_does_not_override_good_values_with_empty(db_connection: sqlite3.Connection) -> None:
+    first = upsert_product_profile(
+        db_connection, ProductProfile(product_name="Soap", brand="Brand A"), "https://shop.com/p/1"
+    )
+    second = upsert_product_profile(
+        db_connection, ProductProfile(product_name="Soap", brand=""), "https://shop.com/p/1"
+    )
+    assert second.product_id == first.product_id
+    assert second.brand == "Brand A"
+
+
+def test_quality_score_prefers_more_complete_profile() -> None:
+    rich = ProductProfile(product_name="P", brand="B", images=[ProductImage(url="https://x/img.jpg")])
+    rich_score, rich_flags = evaluate_product_quality(rich, "https://x/p")
+    poor_score, poor_flags = evaluate_product_quality(ProductProfile(product_name="P"), None)
+    assert rich_score > poor_score
+    assert "missing_brand" not in rich_flags
+    assert "missing_source_url" in poor_flags

@@ -135,6 +135,33 @@ def test_process_updates_existing_product_instead_of_duplicating(tmp_path) -> No
     assert product.product_name == "Updated Name"
 
 
+def test_process_deduplicates_by_source_url_without_barcode(tmp_path) -> None:
+    db_path = tmp_path / "url_processor_source_url.db"
+    initialize_database(str(db_path))
+
+    def profile(name: str) -> ProductProfile:
+        return ProductProfile(
+            product_name=name,
+            status="discovered",
+            evidence=[],
+        )
+
+    with get_connection(str(db_path)) as connection:
+        first = create_discovery_job(connection, _make_job())
+        second = create_discovery_job(connection, _make_job())
+        first_result = process_url_extraction_job(
+            connection, first.job_id, extractor=lambda url: profile("A")
+        )
+        second_result = process_url_extraction_job(
+            connection, second.job_id, extractor=lambda url: profile("A Updated")
+        )
+        count = connection.execute("SELECT COUNT(*) AS c FROM products").fetchone()["c"]
+
+    assert first_result is not None and second_result is not None
+    assert first_result.result_product_id == second_result.result_product_id
+    assert count == 1
+
+
 def test_process_marks_failed_when_extractor_raises(tmp_path) -> None:
     db_path = tmp_path / "url_processor.db"
     initialize_database(str(db_path))

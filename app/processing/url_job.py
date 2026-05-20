@@ -1,5 +1,6 @@
 import sqlite3
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 try:
     from app.extractors.product_page import extract_product_from_url
@@ -17,11 +18,11 @@ from app.jobs.repository import (
     update_discovery_job_status,
 )
 from app.models import ProductProfile
+from app.models.evidence import SourceEvidence
 from app.models.repository import (
     add_product_evidence,
-    create_product,
-    get_product_by_barcode,
-    update_product,
+    normalize_source_url,
+    upsert_product_profile,
 )
 from app.sources import update_discovered_url_by_source_and_url
 
@@ -70,35 +71,25 @@ def process_url_extraction_job(
             _update_discovered_url_after_processing(connection, job, "not_found")
             return update_discovery_job_status(connection, job_id, JobStatus.not_found)
 
-        if product.barcode:
-            existing = get_product_by_barcode(connection, product.barcode)
-        else:
-            existing = None
-
-        if existing is None:
-            saved = create_product(connection, product)
-        else:
-            saved = update_product(
-                connection,
-                product.model_copy(update={"product_id": existing.product_id}),
-            )
-            if saved is None:
-                error_message = "Failed to update existing product"
-                _update_discovered_url_after_processing(
-                    connection,
-                    job,
-                    "failed",
-                    error_message=error_message,
-                )
-                return update_discovery_job_status(
-                    connection,
-                    job_id,
-                    JobStatus.failed,
-                    error_message=error_message,
-                )
+        saved = upsert_product_profile(connection, product, source_url=job.input_value)
 
         for evidence in product.evidence:
             add_product_evidence(connection, saved.product_id or "", evidence)
+        if not any(e.field_name == "source_url" for e in product.evidence):
+            add_product_evidence(
+                connection,
+                saved.product_id or "",
+                SourceEvidence(
+                    source_name="url_extractor",
+                    source_type="url_extraction",
+                    source_url=job.input_value,
+                    field_name="source_url",
+                    raw_value=job.input_value,
+                    normalized_value=normalize_source_url(job.input_value),
+                    confidence=1.0,
+                    extracted_at=datetime.now(UTC),
+                ),
+            )
 
         _update_discovered_url_after_processing(
             connection,
