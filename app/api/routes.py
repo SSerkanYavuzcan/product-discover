@@ -31,6 +31,9 @@ from app.api.schemas import (
     SourceProcessingSummaryResponse,
     SourceRegistryCreateRequest,
     SourceRegistryResponse,
+    SourceScraperCapabilityResponse,
+    SourceScrapeRequest,
+    SourceScrapeResponse,
     UrlIngestionRequest,
     UrlIngestionResponse,
 )
@@ -44,6 +47,8 @@ from app.models.repository import get_product, get_product_by_barcode, list_prod
 from app.processing.discovered_url_jobs import (
     create_url_extraction_jobs_from_discovered_urls,
 )
+from app.processing.scraper_job import persist_scraped_products
+from app.scrapers.registry import get_scraper_for_source
 from app.sources import (
     SourceRegistry,
     create_source,
@@ -280,6 +285,83 @@ def discover_source_sitemap(
         )
 
     return ExtractionRunResponse.model_validate(run.model_dump())
+
+
+@router.get(
+    "/sources/{source_id}/scraper-capability",
+    response_model=SourceScraperCapabilityResponse,
+    status_code=status.HTTP_200_OK,
+)
+def read_source_scraper_capability(
+    source_id: str,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> SourceScraperCapabilityResponse:
+    source = get_source(connection, source_id)
+    if source is None:
+        return SourceScraperCapabilityResponse(source_id=source_id, has_custom_scraper=False)
+    scraper = get_scraper_for_source(source)
+    return SourceScraperCapabilityResponse(
+        source_id=source_id,
+        has_custom_scraper=scraper is not None,
+        scraper_name=scraper.__class__.__name__ if scraper else None,
+        supported_domain=(
+            scraper.domain_patterns[0]
+            if scraper and scraper.domain_patterns
+            else None
+        ),
+    )
+
+
+@router.post(
+    "/sources/{source_id}/scrape",
+    response_model=SourceScrapeResponse,
+    status_code=status.HTTP_200_OK,
+)
+def scrape_source(
+    source_id: str,
+    payload: SourceScrapeRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> SourceScrapeResponse:
+    source = get_source(connection, source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    scraper = None if payload.force_generic else get_scraper_for_source(source)
+    if scraper is None:
+        return SourceScrapeResponse(
+            source_id=source_id,
+            source_name=source.source_name,
+            method="no_custom_scraper",
+            scraper_name=None,
+            requested_limit=payload.limit,
+            scraped_count=0,
+            persisted_count=0,
+            skipped_count=0,
+            error_count=0,
+            errors=[],
+        )
+
+    scraped_products = scraper.scrape(source=source, limit=payload.limit)
+    persisted_count, skipped_count, persist_errors = persist_scraped_products(
+        connection=connection,
+        source=source,
+        scraped_products=scraped_products,
+    )
+    return SourceScrapeResponse(
+        source_id=source_id,
+        source_name=source.source_name,
+        method="custom_scraper",
+        scraper_name=scraper.__class__.__name__,
+        requested_limit=payload.limit,
+        scraped_count=len(scraped_products),
+        persisted_count=persisted_count,
+        skipped_count=skipped_count,
+        error_count=len(persist_errors),
+        errors=persist_errors,
+    )
 
 
 @router.get(
