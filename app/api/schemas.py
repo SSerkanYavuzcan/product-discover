@@ -212,6 +212,30 @@ class SourceProcessingSummaryResponse(BaseModel):
     total_products: int
     remaining_urls: int
 
+class SourceScrapeRequest(BaseModel):
+    limit: int = Field(default=100, ge=1, le=500)
+    force_generic: bool = False
+
+
+class SourceScrapeResponse(BaseModel):
+    source_id: str
+    source_name: str
+    method: str
+    scraper_name: str | None = None
+    requested_limit: int
+    scraped_count: int
+    persisted_count: int
+    skipped_count: int
+    error_count: int
+    errors: list[str] = Field(default_factory=list)
+
+
+class SourceScraperCapabilityResponse(BaseModel):
+    source_id: str
+    has_custom_scraper: bool
+    scraper_name: str | None = None
+    supported_domain: str | None = None
+
 
 class ProcessNextBatchRequest(BaseModel):
     batch_size: int = Field(default=20, ge=1, le=20)
