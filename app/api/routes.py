@@ -345,6 +345,7 @@ def scrape_source(
         )
 
     scraped_products = scraper.scrape(source=source, limit=payload.limit)
+    scrape_errors = list(getattr(scraper, "errors", []))
     persisted_count, skipped_count, persist_errors = persist_scraped_products(
         connection=connection,
         source=source,
@@ -359,8 +360,8 @@ def scrape_source(
         scraped_count=len(scraped_products),
         persisted_count=persisted_count,
         skipped_count=skipped_count,
-        error_count=len(persist_errors),
-        errors=persist_errors,
+        error_count=len(scrape_errors) + len(persist_errors),
+        errors=scrape_errors + persist_errors,
     )
 
 
