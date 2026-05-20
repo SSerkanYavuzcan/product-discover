@@ -15,6 +15,8 @@ from app.api.schemas import (
     DiscoveredUrlJobCreationRequest,
     DiscoveredUrlJobCreationResponse,
     DiscoveredUrlResponse,
+    DiscoveredUrlRetryRequest,
+    DiscoveredUrlRetryResponse,
     ExtractionRunResponse,
     JobProcessResponse,
     ProcessedJobItemResponse,
@@ -54,6 +56,7 @@ from app.sources.repository import (
     delete_all_system_data,
     delete_source_completely,
     get_source_processing_summary_counts,
+    reset_discovered_urls_for_retry,
 )
 
 router = APIRouter()
@@ -341,6 +344,45 @@ def create_jobs_from_discovered_urls(
         job_ids=result.job_ids,
     )
 
+
+
+
+@router.post(
+    "/sources/{source_id}/discovered-urls/retry",
+    response_model=DiscoveredUrlRetryResponse,
+    status_code=status.HTTP_200_OK,
+)
+def retry_discovered_urls(
+    source_id: str,
+    payload: DiscoveredUrlRetryRequest,
+    connection: Annotated[sqlite3.Connection, Depends(get_db_connection)],
+) -> DiscoveredUrlRetryResponse:
+    source = get_source(connection, source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source not found: {source_id}",
+        )
+
+    allowed_statuses = {"failed", "not_found", "queued"}
+    unsupported_statuses = sorted(set(payload.statuses) - allowed_statuses)
+    if unsupported_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Unsupported retry status values: "
+                + ", ".join(unsupported_statuses)
+                + ". Allowed: failed, not_found, queued"
+            ),
+        )
+
+    result = reset_discovered_urls_for_retry(
+        connection=connection,
+        source_id=source_id,
+        statuses=payload.statuses,
+        limit=payload.limit,
+    )
+    return DiscoveredUrlRetryResponse.model_validate(result)
 
 @router.get(
     "/sources/{source_id}/processing-summary",

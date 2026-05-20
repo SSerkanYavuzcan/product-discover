@@ -170,6 +170,20 @@ class DiscoveredUrlResponse(BaseModel):
     error_message: str | None = None
 
 
+
+class DiscoveredUrlRetryRequest(BaseModel):
+    statuses: list[str] = Field(default_factory=lambda: ["failed", "not_found"], min_length=1)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class DiscoveredUrlRetryResponse(BaseModel):
+    source_id: str
+    requested_statuses: list[str] = Field(default_factory=list)
+    requested_limit: int
+    reset_count: int
+    remaining_by_status: dict[str, int] = Field(default_factory=dict)
+
+
 class DiscoveredUrlJobCreationRequest(BaseModel):
     status: str = "discovered"
     limit: int = Field(default=50, ge=1, le=500)

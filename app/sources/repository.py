@@ -331,6 +331,76 @@ def get_source_processing_summary_counts(
     }
 
 
+
+
+def count_discovered_urls_by_status(
+    connection: sqlite3.Connection,
+    source_id: str,
+) -> dict[str, int]:
+    rows = connection.execute(
+        """
+        SELECT status, COUNT(*) AS count
+        FROM discovered_urls
+        WHERE source_id = ?
+        GROUP BY status
+        """,
+        (source_id,),
+    ).fetchall()
+    return {row["status"]: int(row["count"] or 0) for row in rows}
+
+
+def reset_discovered_urls_for_retry(
+    connection: sqlite3.Connection,
+    source_id: str,
+    statuses: list[str],
+    limit: int = 100,
+) -> dict[str, str | int | list[str] | dict[str, int]]:
+    normalized_limit = max(1, min(limit, 500))
+    requested_statuses = list(dict.fromkeys(statuses))
+    if not requested_statuses:
+        requested_statuses = ["failed", "not_found"]
+
+    placeholders = ", ".join("?" for _ in requested_statuses)
+    params: list[str | int] = [source_id, *requested_statuses, normalized_limit]
+    rows = connection.execute(
+        f"""
+        SELECT url_id
+        FROM discovered_urls
+        WHERE source_id = ?
+          AND status IN ({placeholders})
+        ORDER BY first_seen_at ASC, url ASC
+        LIMIT ?
+        """,
+        tuple(params),
+    ).fetchall()
+
+    reset_count = 0
+    if rows:
+        url_ids = [row["url_id"] for row in rows]
+        id_placeholders = ", ".join("?" for _ in url_ids)
+        connection.execute(
+            f"""
+            UPDATE discovered_urls
+            SET status = 'discovered',
+                error_message = NULL,
+                last_checked_at = NULL
+            WHERE source_id = ?
+              AND url_id IN ({id_placeholders})
+            """,
+            (source_id, *url_ids),
+        )
+        connection.commit()
+        reset_count = len(url_ids)
+
+    remaining_by_status = count_discovered_urls_by_status(connection, source_id)
+    return {
+        "source_id": source_id,
+        "requested_statuses": requested_statuses,
+        "requested_limit": normalized_limit,
+        "reset_count": reset_count,
+        "remaining_by_status": remaining_by_status,
+    }
+
 def _deserialize_extraction_run(row: sqlite3.Row) -> ExtractionRun:
     return ExtractionRun(
         run_id=row["run_id"],

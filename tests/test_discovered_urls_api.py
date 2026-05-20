@@ -251,3 +251,245 @@ def test_list_discovered_urls_by_source_orders_and_filters(tmp_path) -> None:
         )
 
     assert [item.url for item in discovered_rows] == ["https://a.com/p/a", "https://a.com/p/b"]
+
+
+def test_retry_discovered_urls_resets_failed_only(tmp_path) -> None:
+    db_path = tmp_path / "discovered_urls_retry_failed_only.db"
+    initialize_database(str(db_path))
+
+    def override_get_db_connection() -> Iterator[sqlite3.Connection]:
+        connection = get_connection(str(db_path))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    app.dependency_overrides[get_db_connection] = override_get_db_connection
+    try:
+        with get_connection(str(db_path)) as connection:
+            source = create_source(
+                connection,
+                SourceRegistry(source_name="Source", source_type="website", base_url="https://a.com"),
+            )
+            for status in ["failed", "not_found", "completed", "discovered"]:
+                create_discovered_url(
+                    connection,
+                    DiscoveredUrl(
+                        source_id=source.source_id,
+                        url=f"https://a.com/{status}",
+                        discovery_type="sitemap",
+                        status=status,
+                    ),
+                )
+
+        client = TestClient(app)
+        response = client.post(
+            f"/sources/{source.source_id}/discovered-urls/retry",
+            json={"statuses": ["failed"], "limit": 100},
+        )
+        assert response.status_code == 200
+
+        with get_connection(str(db_path)) as connection:
+            rows = list_discovered_urls_by_source(connection, source.source_id or "", limit=10)
+
+        statuses = {row.url: row.status for row in rows}
+        assert statuses["https://a.com/failed"] == "discovered"
+        assert statuses["https://a.com/not_found"] == "not_found"
+        assert statuses["https://a.com/completed"] == "completed"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retry_discovered_urls_resets_failed_and_not_found(tmp_path) -> None:
+    db_path = tmp_path / "discovered_urls_retry_failed_not_found.db"
+    initialize_database(str(db_path))
+
+    def override_get_db_connection() -> Iterator[sqlite3.Connection]:
+        connection = get_connection(str(db_path))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    app.dependency_overrides[get_db_connection] = override_get_db_connection
+    try:
+        with get_connection(str(db_path)) as connection:
+            source = create_source(
+                connection,
+                SourceRegistry(source_name="Source", source_type="website", base_url="https://a.com"),
+            )
+            for status in ["failed", "not_found", "queued"]:
+                create_discovered_url(
+                    connection,
+                    DiscoveredUrl(
+                        source_id=source.source_id,
+                        url=f"https://a.com/{status}",
+                        discovery_type="sitemap",
+                        status=status,
+                    ),
+                )
+
+        client = TestClient(app)
+        response = client.post(
+            f"/sources/{source.source_id}/discovered-urls/retry",
+            json={"statuses": ["failed", "not_found"], "limit": 100},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["reset_count"] == 2
+        assert "remaining_by_status" in payload
+
+        with get_connection(str(db_path)) as connection:
+            rows = list_discovered_urls_by_source(connection, source.source_id or "", limit=10)
+
+        statuses = {row.url: row.status for row in rows}
+        assert statuses["https://a.com/failed"] == "discovered"
+        assert statuses["https://a.com/not_found"] == "discovered"
+        assert statuses["https://a.com/queued"] == "queued"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retry_discovered_urls_resets_queued(tmp_path) -> None:
+    db_path = tmp_path / "discovered_urls_retry_queued.db"
+    initialize_database(str(db_path))
+
+    def override_get_db_connection() -> Iterator[sqlite3.Connection]:
+        connection = get_connection(str(db_path))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    app.dependency_overrides[get_db_connection] = override_get_db_connection
+    try:
+        with get_connection(str(db_path)) as connection:
+            source = create_source(
+                connection,
+                SourceRegistry(source_name="Source", source_type="website", base_url="https://a.com"),
+            )
+            create_discovered_url(
+                connection,
+                DiscoveredUrl(
+                    source_id=source.source_id,
+                    url="https://a.com/queued",
+                    discovery_type="sitemap",
+                    status="queued",
+                ),
+            )
+
+        client = TestClient(app)
+        response = client.post(
+            f"/sources/{source.source_id}/discovered-urls/retry",
+            json={"statuses": ["queued"], "limit": 100},
+        )
+        assert response.status_code == 200
+
+        with get_connection(str(db_path)) as connection:
+            rows = list_discovered_urls_by_source(connection, source.source_id or "", limit=10)
+
+        assert rows[0].status == "discovered"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retry_discovered_urls_rejects_completed_status(tmp_path) -> None:
+    db_path = tmp_path / "discovered_urls_retry_completed_rejected.db"
+    initialize_database(str(db_path))
+
+    def override_get_db_connection() -> Iterator[sqlite3.Connection]:
+        connection = get_connection(str(db_path))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    app.dependency_overrides[get_db_connection] = override_get_db_connection
+    try:
+        with get_connection(str(db_path)) as connection:
+            source = create_source(
+                connection,
+                SourceRegistry(source_name="Source", source_type="website", base_url="https://a.com"),
+            )
+
+        client = TestClient(app)
+        response = client.post(
+            f"/sources/{source.source_id}/discovered-urls/retry",
+            json={"statuses": ["completed"], "limit": 100},
+        )
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retry_discovered_urls_respects_limit(tmp_path) -> None:
+    db_path = tmp_path / "discovered_urls_retry_limit.db"
+    initialize_database(str(db_path))
+
+    def override_get_db_connection() -> Iterator[sqlite3.Connection]:
+        connection = get_connection(str(db_path))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    app.dependency_overrides[get_db_connection] = override_get_db_connection
+    try:
+        with get_connection(str(db_path)) as connection:
+            source = create_source(
+                connection,
+                SourceRegistry(source_name="Source", source_type="website", base_url="https://a.com"),
+            )
+            for index in range(10):
+                create_discovered_url(
+                    connection,
+                    DiscoveredUrl(
+                        source_id=source.source_id,
+                        url=f"https://a.com/failed/{index}",
+                        discovery_type="sitemap",
+                        status="failed",
+                    ),
+                )
+
+        client = TestClient(app)
+        response = client.post(
+            f"/sources/{source.source_id}/discovered-urls/retry",
+            json={"statuses": ["failed"], "limit": 3},
+        )
+        assert response.status_code == 200
+        assert response.json()["reset_count"] == 3
+
+        with get_connection(str(db_path)) as connection:
+            discovered = list_discovered_urls_by_source(
+                connection,
+                source.source_id or "",
+                status="discovered",
+                limit=20,
+            )
+
+        assert len(discovered) == 3
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retry_discovered_urls_missing_source_returns_404(tmp_path) -> None:
+    db_path = tmp_path / "discovered_urls_retry_missing_source.db"
+    initialize_database(str(db_path))
+
+    def override_get_db_connection() -> Iterator[sqlite3.Connection]:
+        connection = get_connection(str(db_path))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    app.dependency_overrides[get_db_connection] = override_get_db_connection
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/sources/missing/discovered-urls/retry",
+            json={"statuses": ["failed"], "limit": 100},
+        )
+        assert response.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
